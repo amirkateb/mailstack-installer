@@ -1,36 +1,38 @@
-MailStack Installer
+# MailStack Installer
 
-🇮🇷 Persian documentation: README.fa.md
+[![Persian README](https://img.shields.io/badge/README-فارسی-green)](README.fa.md)
+[![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
+[![Bash](https://img.shields.io/badge/Bash-Installer-4EAA25?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![GitHub](https://img.shields.io/badge/GitHub-amirkateb-181717?logo=github)](https://github.com/amirkateb)
 
-MailStack Installer
+> 🇮🇷 **Persian documentation:** [README.fa.md](README.fa.md)
 
-A production-ready interactive installer for deploying Stalwart Mail Server + Bulwark Webmail on Ubuntu 24.04 LTS.
+A production-ready interactive installer for deploying **Stalwart Mail Server + Bulwark Webmail** on **Ubuntu 24.04 LTS**.
 
 It automates most of the work required to deploy a modern self-hosted mail server, including DNS validation, Docker installation and fallbacks, TLS certificates, Nginx reverse proxying, firewall configuration, and SPF/DKIM/DMARC setup assistance.
 
-Built by amirmohammad katebsaber
+> Built by **amirmohammad katebsaber**
 
-⸻
+---
 
-Overview
+## Overview
 
 MailStack Installer deploys a complete modern email stack based on:
 
-* Stalwart Mail Server
-* Bulwark Webmail
-* Nginx
-* Let’s Encrypt
-* Docker / Docker Compose
-* Ubuntu 24.04 LTS
+- **Stalwart Mail Server**
+- **Bulwark Webmail**
+- **Nginx**
+- **Let's Encrypt**
+- **Docker / Docker Compose**
+- **Ubuntu 24.04 LTS**
 
-The installer guides you through the deployment process step by step.
+The installer guides you through the deployment process step by step, validates critical requirements before continuing, and stops immediately when an unrecoverable problem is detected.
 
-It validates critical requirements before continuing and stops immediately when an unrecoverable problem is detected.
+---
 
-⸻
+## Architecture
 
-Architecture
-
+```text
                          Internet
                             │
               ┌─────────────┴─────────────┐
@@ -46,65 +48,59 @@ Architecture
                                │                           │
                           Stalwart UI                  Bulwark
                           JMAP / API                   Webmail
+```
 
 Public services:
 
+```text
 25    SMTP
 465   SMTPS
 587   SMTP Submission
 993   IMAPS
 80    HTTP
 443   HTTPS
+```
 
 Internal-only services:
 
+```text
 127.0.0.1:8080   Stalwart HTTP/JMAP
 127.0.0.1:3000   Bulwark Webmail
+```
 
-⸻
+---
 
-Features
+# Features
 
-Interactive Installation
+## Interactive Installation
 
 The installer asks for your primary domain and automatically generates the required service hostnames.
 
-For example:
-
+```text
 Domain:
 example.com
+
 Mail hostname:
 mail.example.com
+
 Webmail hostname:
 webmail.example.com
+```
 
-⸻
+## DNS Validation
 
-DNS Validation
+Before installing the mail stack, the installer validates:
 
-Before installing the mail stack, the installer validates important DNS configuration.
+- Public IPv4
+- Mail server A record
+- Webmail A record
+- MX record
+- PTR / Reverse DNS
+- Forward-confirmed hostname resolution
 
-Checks include:
+If a required DNS record is incorrect, the installer tells you exactly what must be changed and stops safely.
 
-* Public IPv4 detection
-* Mail server A record
-* Webmail A record
-* MX record
-* PTR / Reverse DNS
-* Forward-confirmed hostname resolution
-
-Example:
-
-mail.example.com      → 203.0.113.10
-webmail.example.com   → 203.0.113.10
-example.com MX        → mail.example.com
-203.0.113.10 PTR      → mail.example.com
-
-If a required DNS record is incorrect, the installer prints exactly what needs to be changed and stops safely.
-
-⸻
-
-SPF, DKIM and DMARC
+## SPF, DKIM and DMARC
 
 The installer never guesses DKIM values.
 
@@ -112,98 +108,81 @@ After Stalwart creates the domain and signing keys, MailStack Installer retrieve
 
 This may include:
 
-* SPF
-* DKIM
-* DMARC
-* MX
-* MTA-STS
-* Autoconfiguration records
-* Other Stalwart-generated records
+- SPF
+- DKIM
+- DMARC
+- MX
+- MTA-STS
+- Autoconfiguration records
+- Other Stalwart-generated records
 
-⸻
+## Docker Installation Fallbacks
 
-Docker Installation Fallbacks
+The preferred installation path uses Ubuntu packages:
 
-The preferred installation path uses Ubuntu’s package repositories:
-
+```bash
 apt install docker.io docker-compose-v2
+```
 
-The installer verifies:
+The installer verifies Docker and Docker Compose before continuing.
 
-docker --version
-docker compose version
-systemctl status docker
+If the primary path fails, alternative installation methods can be attempted automatically.
 
-before continuing.
+## Restricted Network Support
 
-If the primary installation path fails, alternative installation methods can be attempted automatically.
-
-⸻
-
-Restricted Network Support
-
-MailStack Installer includes special handling for servers with restricted or unreliable access to international repositories.
+MailStack Installer includes extra handling for servers with limited access to international repositories and registries.
 
 It can:
 
-* Test Ubuntu repositories
-* Detect broken or unreachable mirrors
-* Test alternative mirrors
-* Back up repository configuration before changing it
-* Test Docker Hub access
-* Configure Docker registry mirrors
-* Test GitHub Container Registry
-* Fall back to alternative Bulwark installation methods
+- Test Ubuntu repositories
+- Detect unreachable mirrors
+- Test alternative mirrors
+- Back up repository configuration
+- Test Docker Hub
+- Configure Docker registry mirrors
+- Test GitHub Container Registry
+- Fall back to a native Bulwark deployment
 
-This can be especially useful on VPS servers located in restricted network environments.
-
-⸻
-
-Bulwark Deployment Fallback
+## Bulwark Deployment Fallback
 
 The official Bulwark image is hosted on:
 
+```text
 ghcr.io
+```
 
-The installer first attempts:
+The installer first tries:
 
+```bash
 docker pull ghcr.io/bulwarkmail/webmail:latest
+```
 
-If GHCR cannot be reached, Bulwark can be installed using a native deployment based on:
+If GHCR is unavailable, Bulwark can be installed natively with:
 
+```text
 Node.js
 npm
 systemd
+```
 
-This allows the installation to continue even when container registries are unavailable.
+## Automatic TLS
 
-⸻
+Let's Encrypt certificates are configured for:
 
-Automatic TLS
-
-Let’s Encrypt certificates are configured for:
-
+```text
 mail.example.com
 webmail.example.com
+```
 
-The certificates are used for:
+Certificates are used for HTTPS and the mail protocols.
 
-* HTTPS
-* SMTP
-* SMTPS
-* SMTP Submission
-* IMAPS
+A Certbot deployment hook keeps the Stalwart certificate copy synchronized after renewal.
 
-A Certbot deployment hook keeps Stalwart certificates synchronized after automatic certificate renewal.
-
-⸻
-
-Nginx Reverse Proxy
-
-Nginx acts as the public web entry point.
+## Nginx Reverse Proxy
 
 Stalwart:
 
+```text
 https://mail.example.com
         │
         ▼
@@ -214,9 +193,11 @@ https://mail.example.com
         │
         ▼
     Stalwart
+```
 
 Bulwark:
 
+```text
 https://webmail.example.com
         │
         ▼
@@ -227,17 +208,13 @@ https://webmail.example.com
         │
         ▼
      Bulwark
+```
 
-Internal services are not exposed directly to the Internet.
-
-⸻
-
-Firewall Configuration
-
-The installer configures UFW and detects the current SSH port before enabling the firewall.
+## Firewall Configuration
 
 Public ports:
 
+```text
 SSH
 25
 80
@@ -245,110 +222,80 @@ SSH
 465
 587
 993
+```
 
-Private application ports:
+Internal application ports:
 
+```text
 3000
 8080
+```
 
-⸻
+## Error Handling
 
-Error Handling
+When a critical command fails, the installer stops and reports:
 
-MailStack Installer stops when a critical operation fails.
+- Installation stage
+- Failed command
+- Line number
+- Reason
+- Log file location
 
-Error reports include information such as:
+---
 
-Installation stage
-Failed command
-Line number
-Reason
-Log file location
+# Requirements
 
-Example:
+Recommended minimum:
 
-[ERROR] Installation stopped.
-Stage:
-Final TLS validation
-Reason:
-IMAPS TLS verification failed.
-Log:
-/var/log/mailstack-installer-20260902.log
-
-⸻
-
-Requirements
-
-Recommended minimum requirements:
-
+```text
 Operating System: Ubuntu Server 24.04 LTS
 CPU:              2 vCPU
 RAM:              2-4 GB
 Storage:          40+ GB SSD
 IPv4:             Static public address
 Access:           Root or sudo
+```
 
 You also need:
 
-* A domain name
-* DNS management access
-* PTR / Reverse DNS control
-* Inbound TCP port 25
-* Outbound TCP port 25
+- A domain name
+- DNS management access
+- PTR / Reverse DNS control
+- Inbound TCP port 25
+- Outbound TCP port 25
 
-⸻
+---
 
-Installation
+# Installation
 
-Option 1 — Clone the Repository
+## Option 1 — Clone the Repository
 
-Connect to your server:
-
+```bash
 ssh root@YOUR_SERVER_IP
-
-Install Git:
-
 apt update
 apt install -y git
-
-Clone the repository:
-
 git clone https://github.com/amirkateb/mailstack-installer.git
-
-Enter the directory:
-
 cd mailstack-installer
-
-Make the installer executable:
-
 chmod +x install-mailstack.sh
-
-Run it:
-
 ./install-mailstack.sh
+```
 
-⸻
+## Option 2 — Download Only the Installer
 
-Option 2 — Download Only the Installer
-
+```bash
 curl -fsSL \
 https://raw.githubusercontent.com/amirkateb/mailstack-installer/main/install-mailstack.sh \
 -o install-mailstack.sh
 
-Make it executable:
-
 chmod +x install-mailstack.sh
-
-Run:
-
 sudo ./install-mailstack.sh
+```
 
-⸻
+---
 
-Installation Flow
+# Installation Flow
 
-The installer performs approximately the following steps:
-
+```text
 1. System validation
 2. Domain input
 3. Public IP detection
@@ -369,373 +316,299 @@ The installer performs approximately the following steps:
 18. Stalwart DNS zone retrieval
 19. SPF / DKIM / DMARC validation
 20. Final health checks
+```
 
-⸻
+---
 
-Initial DNS Configuration
+# Initial DNS Configuration
 
 Assume:
 
-Domain:
-example.com
-Server IPv4:
-203.0.113.10
+```text
+Domain: example.com
+Server IPv4: 203.0.113.10
+```
 
 Create:
 
-Mail A Record
-
+```text
 Type: A
 Name: mail
 Value: 203.0.113.10
+```
 
-Webmail A Record
-
+```text
 Type: A
 Name: webmail
 Value: 203.0.113.10
+```
 
-MX Record
-
+```text
 Type: MX
 Name: @
 Priority: 10
 Value: mail.example.com
+```
 
-⸻
+---
 
-Reverse DNS
+# Reverse DNS
 
-Configure PTR at your VPS provider:
+Configure your VPS PTR record:
 
-203.0.113.10
-        │
-        ▼
-mail.example.com
+```text
+203.0.113.10 → mail.example.com
+```
 
-Forward DNS must also resolve back to the same IP:
+Forward DNS should also resolve back to the same IP:
 
-mail.example.com
-        │
-        ▼
-203.0.113.10
+```text
+mail.example.com → 203.0.113.10
+```
 
 A correct PTR record is extremely important for email deliverability.
 
-⸻
+---
 
-Cloudflare
+# Cloudflare
 
-If you use Cloudflare DNS, the mail hostname must normally remain:
+If you use Cloudflare DNS, keep the mail hostname on:
 
+```text
 DNS Only
-
-Do not proxy SMTP or IMAP using Cloudflare’s normal HTTP proxy.
+```
 
 Recommended during installation:
 
+```text
 mail.example.com       DNS Only
 webmail.example.com    DNS Only
+```
 
-⸻
+Do not proxy SMTP or IMAP through Cloudflare's standard HTTP proxy.
 
-After Installation
+---
 
-Stalwart Administration
+# After Installation
 
+Stalwart Administration:
+
+```text
 https://mail.example.com/admin
+```
 
-Bulwark Webmail
+Bulwark Webmail:
 
+```text
 https://webmail.example.com
+```
 
-⸻
+---
 
-Mail Client Configuration
+# Mail Client Configuration
 
-IMAP
+## IMAP
 
-Server:       mail.example.com
-Port:         993
-Security:     SSL/TLS
-Username:     user@example.com
+```text
+Server:         mail.example.com
+Port:           993
+Security:       SSL/TLS
+Username:       user@example.com
 Authentication: Password
+```
 
-SMTP
+## SMTP
 
-Server:       mail.example.com
-Port:         465
-Security:     SSL/TLS
-Username:     user@example.com
+```text
+Server:         mail.example.com
+Port:           465
+Security:       SSL/TLS
+Username:       user@example.com
 Authentication: Password
+```
 
-Alternatively:
+Alternative:
 
+```text
 Port:     587
 Security: STARTTLS
+```
 
-⸻
+---
 
-Testing Deliverability
+# Testing Deliverability
 
-After installation, send test messages to providers such as:
+After installation, send test messages to Gmail, Outlook, and Yahoo.
 
-* Gmail
-* Outlook
-* Yahoo
+Authentication should ideally show:
 
-Authentication results should ideally show:
-
+```text
 SPF:   PASS
 DKIM:  PASS
 DMARC: PASS
+```
 
 Passing these tests does not guarantee inbox placement.
 
-Deliverability also depends on:
+Deliverability also depends on IP reputation, domain reputation, sending volume, complaint rate, message content, PTR configuration, and blacklist status.
 
-* IP reputation
-* Domain reputation
-* Sending volume
-* Complaint rate
-* Message content
-* PTR configuration
-* Blacklist status
+---
 
-⸻
+# Useful Commands
 
-Useful Commands
+Stalwart:
 
-Stalwart Status
-
+```bash
 systemctl status stalwart
-
-Restart Stalwart
-
 systemctl restart stalwart
-
-Stalwart Logs
-
 journalctl -u stalwart -f
+```
 
-⸻
+Docker:
 
-Docker Status
-
+```bash
 systemctl status docker
-
-Containers
-
 docker ps
-
-Bulwark Logs
-
 docker logs -f bulwark
+```
 
-⸻
+Nginx:
 
-Nginx Test
-
+```bash
 nginx -t
-
-Reload Nginx
-
 systemctl reload nginx
+```
 
-⸻
+Network:
 
-Network Verification
-
+```bash
 ss -lntp
+```
 
-Typical public listeners:
+Outbound SMTP:
 
-0.0.0.0:25
-0.0.0.0:80
-0.0.0.0:443
-0.0.0.0:465
-0.0.0.0:587
-0.0.0.0:993
-
-Internal listeners:
-
-127.0.0.1:3000
-127.0.0.1:8080
-
-⸻
-
-Test Outbound SMTP
-
+```bash
 nc -vz -w 8 gmail-smtp-in.l.google.com 25
+```
 
-A successful result should look similar to:
+DNS:
 
-Connection to gmail-smtp-in.l.google.com 25 port [tcp/smtp] succeeded!
-
-If it times out, your provider may be blocking outbound SMTP.
-
-⸻
-
-DNS Tests
-
-Mail hostname:
-
+```bash
 dig +short A mail.example.com
-
-MX:
-
 dig +short MX example.com
-
-PTR:
-
 dig -x YOUR_SERVER_IP +short
-
-SPF:
-
 dig TXT example.com
-
-DMARC:
-
 dig TXT _dmarc.example.com
+```
 
-⸻
+TLS:
 
-TLS Tests
+```bash
+openssl s_client -connect mail.example.com:993 -servername mail.example.com
+openssl s_client -connect mail.example.com:465 -servername mail.example.com
+```
 
-IMAPS:
+---
 
-openssl s_client \
--connect mail.example.com:993 \
--servername mail.example.com
-
-SMTPS:
-
-openssl s_client \
--connect mail.example.com:465 \
--servername mail.example.com
-
-⸻
-
-Updating Bulwark
+# Updating Bulwark
 
 For Docker installations:
 
+```bash
 cd /opt/bulwark
 docker compose pull
 docker compose up -d
 docker compose ps
+```
 
-⸻
+---
 
-Backups
+# Backups
 
-Important Stalwart paths:
+Important paths:
 
+```text
 /etc/stalwart
 /var/lib/stalwart
-
-Also consider backing up:
-
 /etc/nginx
 /etc/letsencrypt
 /opt/bulwark
+```
 
-and all relevant Docker volumes.
+Also back up all relevant Docker volumes.
 
 Always keep at least one backup outside the mail server itself.
 
-⸻
+---
 
-Security Recommendations
+# Security Recommendations
 
-A public mail server should be continuously maintained.
+- Keep Ubuntu updated
+- Keep Stalwart updated
+- Keep Bulwark updated
+- Keep Docker updated
+- Use strong passwords
+- Enable MFA where available
+- Monitor logs
+- Monitor disk usage
+- Maintain regular backups
+- Do not expose internal service ports
+- Monitor abuse and unusual SMTP activity
+- Configure rate limits
+- Never operate an open SMTP relay
 
-Recommended practices:
+---
 
-* Keep Ubuntu updated
-* Keep Stalwart updated
-* Keep Bulwark updated
-* Keep Docker updated
-* Use strong passwords
-* Enable MFA where available
-* Monitor system and mail logs
-* Monitor disk usage
-* Maintain regular backups
-* Protect administrator accounts
-* Do not expose internal service ports
-* Monitor abuse and unusual SMTP activity
-* Configure rate limits
-* Never operate an open SMTP relay
+# Troubleshooting
 
-⸻
+## Docker Pull Fails
 
-Troubleshooting
-
-Docker Pull Fails
-
+```bash
 docker pull hello-world
-
-Then:
-
 docker pull ghcr.io/bulwarkmail/webmail:latest
+```
 
 If Docker Hub works but GHCR fails, the problem may specifically affect GitHub Container Registry.
 
-MailStack Installer may use an alternative Bulwark installation method.
+## Port 25 Is Blocked
 
-⸻
-
-Port 25 Is Blocked
-
+```bash
 nc -vz -w 8 gmail-smtp-in.l.google.com 25
+```
 
 If it times out, contact your VPS provider.
 
-⸻
+## PTR Is Incorrect
 
-PTR Is Incorrect
-
+```bash
 dig -x YOUR_SERVER_IP +short
+```
 
 Expected:
 
+```text
 mail.example.com.
+```
 
-Configure Reverse DNS from your VPS provider’s control panel.
+## Bulwark Returns 502
 
-⸻
-
-Bulwark Returns 502
-
-Check:
-
+```bash
 docker ps
-
-Then:
-
 curl http://127.0.0.1:3000/api/health
-
-And:
-
 nginx -t
+```
 
-⸻
+## Stalwart Interface Is Unavailable
 
-Stalwart Interface Is Unavailable
-
+```bash
 systemctl status stalwart
-
-Then:
-
 curl http://127.0.0.1:8080
-
-And inspect logs:
-
 journalctl -u stalwart -n 200
+```
 
-⸻
+---
 
-Project
+# Project
 
 Repository:
 
@@ -743,27 +616,27 @@ https://github.com/amirkateb/mailstack-installer
 
 Persian documentation:
 
-README.fa.md
+[README.fa.md](README.fa.md)
 
-⸻
+---
 
-Author
+# Author
 
-amirmohammad katebsaber
+**amirmohammad katebsaber**
 
 GitHub:
 
 https://github.com/amirkateb
 
-⸻
+---
 
-License
+# License
 
-A permissive license such as the MIT License is recommended for this project.
+A permissive license such as the **MIT License** is recommended.
 
-⸻
+---
 
-Disclaimer
+# Disclaimer
 
 Running your own email infrastructure requires ongoing maintenance, DNS management, monitoring, backups, security hardening, reputation management, and abuse prevention.
 

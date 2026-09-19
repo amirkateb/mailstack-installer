@@ -9,7 +9,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 STATE_DIR="/var/lib/katebsaber-mailstack-installer"
 DONE_DIR="${STATE_DIR}/done"
 CONFIG_FILE="${STATE_DIR}/config.env"
@@ -995,18 +995,62 @@ listener_query_json() {
     --fields id,name,protocol,bind,useTls,tlsImplicit --json
 }
 
-find_listener_by_port() {
-  local json="$1" protocol="$2" port="$3"
-  jq -r --arg proto "$protocol" --arg suffix ":${port}" '
+find_listener_by_name_or_port() {
+  local json="$1" name="$2" protocol="$3" port="$4" id
+
+  # Prefer the stable Stalwart listener name. This lets a re-run repair a
+  # listener even if its bind address/port was changed manually.
+  id=$(jq -r --arg name "$name" 'select(.name == $name) | .id' <<<"$json" | head -n1 || true)
+  if [[ -n "$id" && "$id" != "null" ]]; then
+    printf '%s' "$id"
+    return 0
+  fi
+
+  # Backward-compatibility: adopt an existing listener on the desired port even
+  # if it has a non-standard name, instead of creating a duplicate bind.
+  id=$(jq -r --arg proto "$protocol" --arg suffix ":${port}" '
     select(.protocol == $proto) |
     select((((.bind // {}) | keys | map(endswith($suffix))) | any)) |
     .id
-  ' <<<"$json" | head -n1
+  ' <<<"$json" | head -n1 || true)
+
+  [[ -n "$id" && "$id" != "null" ]] && printf '%s' "$id"
+}
+
+create_listener_upsert() {
+  local name="$1" protocol="$2" bind="$3" implicit="$4" use_tls="$5"
+
+  # NetworkListener names are the stable natural key used by Stalwart's
+  # declarative API. Using upsert keeps this safe to re-run and, critically,
+  # supplies the listener name on creation (required by the server).
+  jq -nc \
+    --arg name "$name" \
+    --arg protocol "$protocol" \
+    --arg bind "$bind" \
+    --argjson implicit "$implicit" \
+    --argjson use_tls "$use_tls" \
+    '{
+      "@type":"upsert",
+      "object":"NetworkListener",
+      "matchOn":["name"],
+      "value":{
+        "listener":{
+          "name":$name,
+          "protocol":$protocol,
+          "bind":{($bind):true},
+          "useTls":$use_tls,
+          "tlsImplicit":$implicit,
+          "overrideProxyTrustedNetworks":{},
+          "tlsDisableCipherSuites":{},
+          "tlsDisableProtocols":{}
+        }
+      }
+    }' | stalwart_cli_recovery apply --stdin --quiet >/dev/null
 }
 
 ensure_listener() {
-  local json="$1" protocol="$2" port="$3" bind="$4" implicit="$5" use_tls="$6" id
-  id=$(find_listener_by_port "$json" "$protocol" "$port" || true)
+  local json="$1" name="$2" protocol="$3" port="$4" bind="$5" implicit="$6" use_tls="$7" id
+  id=$(find_listener_by_name_or_port "$json" "$name" "$protocol" "$port" || true)
 
   if [[ -n "$id" ]]; then
     stalwart_cli_recovery update NetworkListener "$id" \
@@ -1014,17 +1058,10 @@ ensure_listener() {
       --field "protocol=${protocol}" \
       --field "useTls=${use_tls}" \
       --field "tlsImplicit=${implicit}" >/dev/null
-    ok "Reconciled ${protocol^^} listener TCP/${port}."
+    ok "Reconciled listener '${name}' on TCP/${port}."
   else
-    stalwart_cli_recovery create NetworkListener \
-      --field "bind={\"${bind}\":true}" \
-      --field "protocol=${protocol}" \
-      --field "useTls=${use_tls}" \
-      --field "tlsImplicit=${implicit}" \
-      --field 'overrideProxyTrustedNetworks={}' \
-      --field 'tlsDisableCipherSuites={}' \
-      --field 'tlsDisableProtocols={}' >/dev/null
-    ok "Created ${protocol^^} listener TCP/${port}."
+    create_listener_upsert "$name" "$protocol" "$bind" "$implicit" "$use_tls"
+    ok "Created listener '${name}' on TCP/${port}."
   fi
 }
 
@@ -1033,20 +1070,20 @@ configure_stalwart_listeners() {
   local listeners id
 
   listeners=$(listener_query_json)
-  ensure_listener "$listeners" smtp 25 '[::]:25' false true
+  ensure_listener "$listeners" smtp smtp 25 '[::]:25' false true
 
   listeners=$(listener_query_json)
-  ensure_listener "$listeners" smtp 465 '[::]:465' true true
+  ensure_listener "$listeners" submissions smtp 465 '[::]:465' true true
 
   listeners=$(listener_query_json)
-  ensure_listener "$listeners" smtp 587 '[::]:587' false true
+  ensure_listener "$listeners" submission smtp 587 '[::]:587' false true
 
   listeners=$(listener_query_json)
-  ensure_listener "$listeners" imap 993 '[::]:993' true true
+  ensure_listener "$listeners" imaps imap 993 '[::]:993' true true
 
   # Normal-mode HTTP API/WebUI is loopback-only.
   listeners=$(listener_query_json)
-  ensure_listener "$listeners" http 8080 '127.0.0.1:8080' false false
+  ensure_listener "$listeners" management http 8080 '127.0.0.1:8080' false false
 
   # If an older Stalwart setup owns public :443, move it away so Nginx owns :443.
   listeners=$(listener_query_json)

@@ -9,7 +9,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-SCRIPT_VERSION="2.0.2"
+SCRIPT_VERSION="2.0.3"
 STATE_DIR="/var/lib/katebsaber-mailstack-installer"
 DONE_DIR="${STATE_DIR}/done"
 CONFIG_FILE="${STATE_DIR}/config.env"
@@ -45,6 +45,15 @@ mkdir -p "$STATE_DIR" "$DONE_DIR" "$LOG_DIR"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
+
+script_identity() {
+  local script_path script_hash
+  script_path=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")
+  script_hash=$(sha256sum "$script_path" 2>/dev/null | awk '{print $1}' || true)
+  info "Installer version: ${SCRIPT_VERSION}"
+  info "Installer path:    ${script_path}"
+  [[ -n "$script_hash" ]] && info "Installer SHA-256: ${script_hash}"
+}
 
 banner() {
   clear 2>/dev/null || true
@@ -846,6 +855,7 @@ install_stalwart() {
   if [[ -n "$binary" ]]; then
     if stalwart_service_exists; then
       ok "Existing Stalwart installation detected: $binary"
+      ok "REINSTALL SKIPPED: the existing Stalwart binary will not be overwritten."
       systemctl daemon-reload >/dev/null 2>&1 || true
       systemctl enable stalwart.service >/dev/null 2>&1 || true
       if ! systemctl is-active --quiet stalwart.service; then
@@ -1809,6 +1819,7 @@ EOF
 main() {
   parse_args "$@"
   banner
+  script_identity
   require_root
   validate_ubuntu
 

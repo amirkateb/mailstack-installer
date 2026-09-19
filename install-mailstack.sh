@@ -9,7 +9,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-SCRIPT_VERSION="2.0.1"
+SCRIPT_VERSION="2.0.2"
 STATE_DIR="/var/lib/katebsaber-mailstack-installer"
 DONE_DIR="${STATE_DIR}/done"
 CONFIG_FILE="${STATE_DIR}/config.env"
@@ -813,21 +813,83 @@ install_and_test_docker() {
 # Stalwart installation + declarative provisioning
 # -----------------------------------------------------------------------------
 
-install_stalwart() {
-  stage "Stalwart installation"
-  if command -v stalwart >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q '^stalwart\.service'; then
-    ok "Stalwart is already installed."
-    touch "$DONE_DIR/stalwart-binary"
-    return
+stalwart_binary_path() {
+  # The official Linux installer uses /usr/local/bin/stalwart.  Do not rely
+  # exclusively on PATH: sudo/non-login shells can have a reduced PATH.
+  if [[ -x /usr/local/bin/stalwart ]]; then
+    printf '%s' /usr/local/bin/stalwart
+    return 0
   fi
 
-  local installer=/tmp/stalwart-install.sh
+  local candidate=""
+  candidate=$(command -v stalwart 2>/dev/null || true)
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+stalwart_service_exists() {
+  # `systemctl list-unit-files | grep` proved too brittle across systemd output
+  # variants. `systemctl cat` directly asks systemd whether the unit resolves.
+  systemctl cat stalwart.service >/dev/null 2>&1
+}
+
+install_stalwart() {
+  stage "Stalwart installation"
+
+  local binary="" installer=/tmp/stalwart-install.sh
+  binary=$(stalwart_binary_path || true)
+
+  if [[ -n "$binary" ]]; then
+    if stalwart_service_exists; then
+      ok "Existing Stalwart installation detected: $binary"
+      systemctl daemon-reload >/dev/null 2>&1 || true
+      systemctl enable stalwart.service >/dev/null 2>&1 || true
+      if ! systemctl is-active --quiet stalwart.service; then
+        info "Stalwart is installed but not running; starting it."
+        systemctl start stalwart.service || \
+          fatal "Stalwart is installed but its service could not be started. Check: journalctl -u stalwart -n 100 --no-pager"
+      fi
+      systemctl is-active --quiet stalwart.service || \
+        fatal "Stalwart service is not active after start attempt."
+      touch "$DONE_DIR/stalwart-binary"
+      ok "Stalwart is installed and running; binary reinstall skipped."
+      return 0
+    fi
+
+    # Never run the upstream installer over an existing binary blindly. If the
+    # executable is currently mapped by a process, Linux returns ETXTBSY when
+    # the installer tries to replace it. More importantly, an orphaned binary
+    # may belong to a non-standard installation that we should not overwrite.
+    fatal "Found an existing Stalwart binary at $binary but no stalwart.service unit. Refusing to overwrite it automatically."
+  fi
+
+  # A running process without a discoverable standard binary is also treated
+  # as an existing/non-standard install rather than something safe to replace.
+  if pgrep -x stalwart >/dev/null 2>&1; then
+    fatal "A Stalwart process is already running but its binary/service could not be identified safely. Refusing to reinstall over a running process."
+  fi
+
+  info "No existing Stalwart installation detected; installing from the official installer."
   curl --proto '=https' --tlsv1.2 -fsS --connect-timeout 10 --max-time 60 \
     https://get.stalw.art/install.sh -o "$installer" || \
     fatal "Cannot download the official Stalwart installer."
   sh "$installer"
   rm -f "$installer"
-  systemctl enable stalwart >/dev/null 2>&1 || true
+
+  binary=$(stalwart_binary_path || true)
+  [[ -n "$binary" ]] || fatal "The official installer completed but the Stalwart binary was not found."
+  stalwart_service_exists || fatal "The official installer completed but stalwart.service was not found."
+
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now stalwart.service >/dev/null 2>&1 || \
+    fatal "Stalwart was installed but stalwart.service could not be enabled/started."
+  systemctl is-active --quiet stalwart.service || \
+    fatal "Stalwart service is not active after installation."
+
   touch "$DONE_DIR/stalwart-binary"
   ok "Stalwart binary and service installed."
 }

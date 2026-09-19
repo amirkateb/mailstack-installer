@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Stalwart + Bulwark Mail Stack Installer for Ubuntu 24.04 LTS
-# Fully automated / resumable edition with Cloudflare DNS automation
+# Fully automated installer + lifecycle manager with Cloudflare DNS automation
 # by amirmohammad katebsaber
 # ==============================================================================
 
@@ -9,7 +9,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-SCRIPT_VERSION="2.0.3"
+SCRIPT_VERSION="3.0.0"
 STATE_DIR="/var/lib/katebsaber-mailstack-installer"
 DONE_DIR="${STATE_DIR}/done"
 CONFIG_FILE="${STATE_DIR}/config.env"
@@ -31,6 +31,10 @@ SKIP_PTR_CHECK=0
 DNS_PROFILE="core"
 DNS_PROFILE_OVERRIDE=""
 NONINTERACTIVE=0
+FORCE_INSTALL=0
+MANAGER_ACTION=""
+GITHUB_API="https://api.github.com"
+BACKUP_ROOT="${STATE_DIR}/backups"
 
 # Colors
 if [[ -t 1 ]]; then
@@ -41,7 +45,7 @@ else
   RED='' GREEN='' YELLOW='' BLUE='' MAGENTA='' CYAN='' WHITE='' DIM='' BOLD='' RESET=''
 fi
 
-mkdir -p "$STATE_DIR" "$DONE_DIR" "$LOG_DIR"
+mkdir -p "$STATE_DIR" "$DONE_DIR" "$LOG_DIR" "$BACKUP_ROOT"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
@@ -67,7 +71,7 @@ banner() {
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 BANNER
-  printf '%b\n' "${RESET}${DIM}Version ${SCRIPT_VERSION} • Ubuntu 24.04 LTS • Cloudflare automation • resumable${RESET}"
+  printf '%b\n' "${RESET}${DIM}Version ${SCRIPT_VERSION} • Ubuntu 24.04 LTS • installer + manager • resumable${RESET}"
   echo
 }
 
@@ -134,6 +138,9 @@ Options:
   --core-dns          Publish only core mail auth DNS (MX/SPF/DKIM/DMARC). Default.
   --skip-ptr-check    Continue even if reverse DNS/PTR is not correct (not recommended).
   --non-interactive   Never wait for manual retry prompts; fail and preserve state instead.
+  --install           Bypass manager detection and run/resume provisioning.
+  --status            On a managed install, print versions/status and exit.
+  --update-all        On a managed install, update all safe components and exit.
   -h, --help          Show this help.
 EOF
 }
@@ -147,11 +154,22 @@ parse_args() {
       --core-dns) DNS_PROFILE="core"; DNS_PROFILE_OVERRIDE="core" ;;
       --skip-ptr-check) SKIP_PTR_CHECK=1 ;;
       --non-interactive) NONINTERACTIVE=1 ;;
+      --install) FORCE_INSTALL=1 ;;
+      --status) MANAGER_ACTION="status" ;;
+      --update-all) MANAGER_ACTION="update-all" ;;
       -h|--help) usage; exit 0 ;;
       *) err "Unknown option: $1"; usage; exit 2 ;;
     esac
     shift
   done
+}
+
+pause() {
+  local prompt=${1:-"Press Enter to continue..."}
+  if (( NONINTERACTIVE )); then
+    return 0
+  fi
+  read -r -p "$prompt" _
 }
 
 confirm() {
@@ -1468,7 +1486,7 @@ install_bulwark_docker() {
   cat >/opt/bulwark-docker/compose.yml <<EOF
 services:
   bulwark:
-    image: ghcr.io/bulwarkmail/webmail:latest
+    image: "${BULWARK_IMAGE:-ghcr.io/bulwarkmail/webmail:latest}"
     container_name: bulwark
     restart: unless-stopped
     ports:
@@ -1814,6 +1832,606 @@ EOF
 
   echo
   ok "Mail stack installation finished successfully."
+  echo
+  printf '%b\n' "${CYAN}${BOLD}================ ACCESS CREDENTIALS ================${RESET}"
+  printf '%b\n' "${YELLOW}${BOLD}Keep these credentials private.${RESET}"
+  echo
+  cat "$SECRETS_FILE"
+  echo
+  printf '%b\n' "${CYAN}${BOLD}====================================================${RESET}"
+  info "Credentials are also saved at: ${SECRETS_FILE}"
+}
+
+
+# -----------------------------------------------------------------------------
+# Lifecycle manager: versions, updates, credentials, health, repair
+# -----------------------------------------------------------------------------
+
+managed_stack_exists() {
+  [[ -s "$CONFIG_FILE" && -s "$SECRETS_STATE_FILE" ]] || return 1
+  stalwart_binary_path >/dev/null 2>&1 || return 1
+  stalwart_service_exists || return 1
+  return 0
+}
+
+load_managed_state() {
+  [[ -s "$CONFIG_FILE" ]] || fatal "Managed configuration file is missing: $CONFIG_FILE"
+  [[ -s "$SECRETS_STATE_FILE" ]] || fatal "Managed secrets state is missing: $SECRETS_STATE_FILE"
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  # shellcheck disable=SC1090
+  source "$SECRETS_STATE_FILE"
+  STALWART_ADMIN_USER="admin@${DOMAIN}"
+
+  if docker inspect bulwark >/dev/null 2>&1; then
+    BULWARK_MODE="docker"
+  elif systemctl cat bulwark.service >/dev/null 2>&1; then
+    BULWARK_MODE="native"
+  else
+    BULWARK_MODE="unknown"
+  fi
+}
+
+normalize_version() {
+  local v="${1:-}"
+  v="${v#v}"
+  printf '%s' "$v"
+}
+
+version_line() {
+  local v
+  v=$(normalize_version "${1:-}")
+  awk -F. '{print $1"."$2}' <<<"$v"
+}
+
+version_is_newer() {
+  local latest current
+  latest=$(normalize_version "${1:-}")
+  current=$(normalize_version "${2:-}")
+  [[ -n "$latest" && -n "$current" ]] || return 1
+  dpkg --compare-versions "$latest" gt "$current"
+}
+
+github_latest_release_json() {
+  local repo="$1"
+  curl -fsSL --connect-timeout 8 --max-time 25 \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    "${GITHUB_API}/repos/${repo}/releases/latest"
+}
+
+github_latest_version() {
+  local repo="$1" json
+  json=$(github_latest_release_json "$repo" 2>/dev/null || true)
+  [[ -n "$json" ]] || return 1
+  jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//'
+}
+
+stalwart_current_version() {
+  local binary out
+  binary=$(stalwart_binary_path 2>/dev/null || true)
+  [[ -n "$binary" ]] || { printf '%s' "not-installed"; return; }
+  out=$("$binary" --version 2>/dev/null | head -n1 || true)
+  grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?' <<<"$out" | head -n1 || printf '%s' "unknown"
+}
+
+stalwart_cli_current_version() {
+  local out
+  command -v stalwart-cli >/dev/null 2>&1 || { printf '%s' "not-installed"; return; }
+  out=$(stalwart-cli --version 2>/dev/null | head -n1 || true)
+  grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?' <<<"$out" | head -n1 || printf '%s' "unknown"
+}
+
+bulwark_current_version() {
+  local v=""
+  if docker inspect bulwark >/dev/null 2>&1; then
+    v=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' bulwark 2>/dev/null || true)
+    [[ "$v" == "<no value>" ]] && v=""
+    if [[ -z "$v" ]]; then
+      v=$(docker exec bulwark node -e '
+        const fs=require("fs");
+        for (const p of ["/app/package.json","/app/.next/standalone/package.json","/app/server/package.json"]) {
+          try { const x=JSON.parse(fs.readFileSync(p,"utf8")); if (x.version) { console.log(x.version); process.exit(0); } } catch(e) {}
+        }
+        process.exit(1);
+      ' 2>/dev/null | head -n1 || true)
+    fi
+  elif [[ -r /opt/bulwark/package.json ]]; then
+    v=$(jq -r '.version // empty' /opt/bulwark/package.json 2>/dev/null || true)
+  fi
+  [[ -n "$v" ]] && printf '%s' "${v#v}" || printf '%s' "unknown"
+}
+
+docker_current_version() {
+  command -v docker >/dev/null 2>&1 || { printf '%s' "not-installed"; return; }
+  docker version --format '{{.Server.Version}}' 2>/dev/null || docker --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || printf '%s' "unknown"
+}
+
+nginx_current_version() {
+  nginx -v 2>&1 | sed -n 's#.*nginx/##p' | head -n1 || true
+}
+
+certbot_current_version() {
+  certbot --version 2>/dev/null | awk '{print $2}' | head -n1 || true
+}
+
+apt_candidate_version() {
+  local pkg="$1"
+  apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/ {print $2; exit}'
+}
+
+print_component_versions() {
+  stage "Installed and latest versions"
+  local sw sw_latest cli cli_latest bw bw_latest dv nv cv
+  sw=$(stalwart_current_version)
+  cli=$(stalwart_cli_current_version)
+  bw=$(bulwark_current_version)
+  dv=$(docker_current_version)
+  nv=$(nginx_current_version)
+  cv=$(certbot_current_version)
+
+  info "Checking official release feeds..."
+  sw_latest=$(github_latest_version stalwartlabs/stalwart 2>/dev/null || true)
+  cli_latest=$(github_latest_version stalwartlabs/cli 2>/dev/null || true)
+  bw_latest=$(github_latest_version bulwarkmail/webmail 2>/dev/null || true)
+
+  printf '\n%-20s %-20s %-20s %s\n' "Component" "Installed" "Latest/Candidate" "State"
+  printf '%-20s %-20s %-20s %s\n' "--------------------" "--------------------" "--------------------" "----------"
+
+  component_version_row "Stalwart" "$sw" "${sw_latest:-unavailable}"
+  component_version_row "Stalwart CLI" "$cli" "${cli_latest:-unavailable}"
+  component_version_row "Bulwark" "$bw" "${bw_latest:-unavailable}"
+  printf '%-20s %-20s %-20s %s\n' "Docker" "${dv:-unknown}" "$(apt_candidate_version docker.io || true)" "APT"
+  printf '%-20s %-20s %-20s %s\n' "Nginx" "${nv:-unknown}" "$(apt_candidate_version nginx || true)" "APT"
+  printf '%-20s %-20s %-20s %s\n' "Certbot" "${cv:-unknown}" "$(apt_candidate_version certbot || true)" "APT"
+  printf '%-20s %-20s %-20s %s\n' "Installer" "$SCRIPT_VERSION" "-" "local"
+  echo
+}
+
+component_version_row() {
+  local label="$1" current="$2" latest="$3" state="unknown"
+  if [[ "$latest" == "unavailable" || "$latest" == "unknown" || -z "$latest" ]]; then
+    state="offline"
+  elif [[ "$current" == "not-installed" ]]; then
+    state="missing"
+  elif [[ "$current" == "unknown" ]]; then
+    state="check"
+  elif version_is_newer "$latest" "$current"; then
+    state="UPDATE"
+  else
+    state="current"
+  fi
+  printf '%-20s %-20s %-20s %s\n' "$label" "$current" "$latest" "$state"
+}
+
+show_access_information() {
+  stage "Access information"
+  write_secrets_summary
+  cat "$SECRETS_FILE"
+  echo
+  info "Credentials file: $SECRETS_FILE"
+}
+
+service_state_word() {
+  local unit="$1"
+  if systemctl is-active --quiet "$unit" 2>/dev/null; then printf '%s' active; else printf '%s' inactive; fi
+}
+
+manager_health_check() {
+  stage "Mail stack health check"
+  local failures=0 p
+
+  if systemctl is-active --quiet stalwart; then ok "Stalwart service is active."; else err "Stalwart service is not active."; failures=$((failures+1)); fi
+  if systemctl is-active --quiet nginx; then ok "Nginx service is active."; else err "Nginx service is not active."; failures=$((failures+1)); fi
+
+  if [[ "${BULWARK_MODE:-unknown}" == "docker" ]]; then
+    if docker inspect -f '{{.State.Running}}' bulwark 2>/dev/null | grep -q true; then ok "Bulwark container is running."; else err "Bulwark container is not running."; failures=$((failures+1)); fi
+  elif [[ "${BULWARK_MODE:-unknown}" == "native" ]]; then
+    if systemctl is-active --quiet bulwark; then ok "Bulwark service is active."; else err "Bulwark service is not active."; failures=$((failures+1)); fi
+  else
+    err "Bulwark deployment could not be identified."
+    failures=$((failures+1))
+  fi
+
+  for p in 25 465 587 993; do
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${p}$"; then
+      ok "TCP/${p} is listening."
+    else
+      err "TCP/${p} is not listening."
+      failures=$((failures+1))
+    fi
+  done
+
+  if curl -fsS --connect-timeout 8 "https://${MAIL_HOST}/.well-known/jmap" >/dev/null 2>&1; then
+    ok "Public JMAP endpoint responds."
+  else
+    err "Public JMAP endpoint failed."
+    failures=$((failures+1))
+  fi
+
+  if curl -fsS --connect-timeout 8 "https://${WEBMAIL_HOST}/api/health" >/dev/null 2>&1; then
+    ok "Public Bulwark health endpoint responds."
+  else
+    err "Public Bulwark health endpoint failed."
+    failures=$((failures+1))
+  fi
+
+  if (( failures == 0 )); then
+    ok "All manager health checks passed."
+  else
+    warn "Health check finished with ${failures} problem(s)."
+    return 1
+  fi
+}
+
+backup_metadata_dir() {
+  local kind="$1" stamp dir
+  stamp=$(date +%Y%m%d-%H%M%S)
+  dir="${BACKUP_ROOT}/${kind}-${stamp}"
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  printf '%s' "$dir"
+}
+
+stalwart_release_asset_name() {
+  case "$(uname -m)" in
+    x86_64) printf '%s' 'stalwart-x86_64-unknown-linux-gnu.tar.gz' ;;
+    aarch64|arm64) printf '%s' 'stalwart-aarch64-unknown-linux-gnu.tar.gz' ;;
+    *) return 1 ;;
+  esac
+}
+
+update_stalwart() {
+  stage "Update Stalwart"
+  local current latest current_line latest_line json asset url digest tmp backup binary newbin
+  current=$(stalwart_current_version)
+  json=$(github_latest_release_json stalwartlabs/stalwart) || fatal "Could not query the latest Stalwart release."
+  latest=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
+  [[ -n "$latest" ]] || fatal "Latest Stalwart version could not be determined."
+
+  info "Installed Stalwart: ${current}"
+  info "Latest Stalwart:    ${latest}"
+  if [[ "$current" != "unknown" ]] && ! version_is_newer "$latest" "$current"; then
+    ok "Stalwart is already current."
+    return 0
+  fi
+
+  if [[ "$current" != "unknown" && "$current" != "not-installed" ]]; then
+    current_line=$(version_line "$current")
+    latest_line=$(version_line "$latest")
+    if [[ "$current_line" != "$latest_line" ]]; then
+      warn "Stalwart release line changed (${current_line} -> ${latest_line})."
+      warn "Automatic cross-line migration is intentionally blocked because Stalwart may require migration steps."
+      warn "Review the official UPGRADING documentation before changing release lines."
+      return 2
+    fi
+  fi
+
+  asset=$(stalwart_release_asset_name) || fatal "Unsupported CPU architecture for automatic Stalwart update: $(uname -m)"
+  url=$(jq -r --arg a "$asset" '.assets[] | select(.name==$a) | .browser_download_url' <<<"$json" | head -n1)
+  digest=$(jq -r --arg a "$asset" '.assets[] | select(.name==$a) | .digest // empty' <<<"$json" | head -n1)
+  [[ -n "$url" ]] || fatal "Could not find Stalwart release asset: $asset"
+
+  backup=$(backup_metadata_dir stalwart)
+  binary=$(stalwart_binary_path) || fatal "Stalwart binary not found."
+  cp -a "$binary" "$backup/stalwart.bin"
+  cp -a /etc/stalwart "$backup/etc-stalwart" 2>/dev/null || true
+  printf 'version=%s\n' "$current" >"$backup/version.txt"
+  info "Backup: $backup"
+
+  tmp=$(mktemp -d)
+  curl -fL --retry 3 --connect-timeout 10 --max-time 300 "$url" -o "$tmp/$asset"
+  if [[ "$digest" == sha256:* ]]; then
+    printf '%s  %s\n' "${digest#sha256:}" "$tmp/$asset" | sha256sum -c - >/dev/null || fatal "Stalwart release SHA-256 verification failed."
+  else
+    warn "GitHub release metadata did not expose a SHA-256 digest; continuing over HTTPS."
+  fi
+  tar -xzf "$tmp/$asset" -C "$tmp"
+  newbin=$(find "$tmp" -maxdepth 3 -type f -name stalwart -perm -u+x | head -n1 || true)
+  [[ -n "$newbin" ]] || fatal "Downloaded Stalwart archive did not contain an executable."
+
+  systemctl stop stalwart
+  install -m 0755 "$newbin" "${binary}.new"
+  mv -f "${binary}.new" "$binary"
+  systemctl start stalwart
+
+  if ! systemctl is-active --quiet stalwart; then
+    err "New Stalwart failed to start; rolling back the previous binary."
+    systemctl stop stalwart >/dev/null 2>&1 || true
+    install -m 0755 "$backup/stalwart.bin" "$binary"
+    systemctl start stalwart >/dev/null 2>&1 || true
+    rm -rf "$tmp"
+    fatal "Stalwart update failed and the previous binary was restored."
+  fi
+
+  sleep 3
+  local after
+  after=$(stalwart_current_version)
+  if [[ "$after" != "$latest" ]]; then
+    warn "Stalwart restarted, but detected version is ${after}; expected ${latest}."
+  else
+    ok "Stalwart updated successfully: ${current} -> ${after}"
+  fi
+  rm -rf "$tmp"
+}
+
+update_stalwart_cli() {
+  stage "Update Stalwart CLI"
+  local current latest script found backup
+  current=$(stalwart_cli_current_version)
+  latest=$(github_latest_version stalwartlabs/cli) || fatal "Could not query latest Stalwart CLI release."
+  info "Installed Stalwart CLI: ${current}"
+  info "Latest Stalwart CLI:    ${latest}"
+  if [[ "$current" != "unknown" && "$current" != "not-installed" ]] && ! version_is_newer "$latest" "$current"; then
+    ok "Stalwart CLI is already current."
+    return 0
+  fi
+
+  backup=$(backup_metadata_dir stalwart-cli)
+  if command -v stalwart-cli >/dev/null 2>&1; then
+    cp -a "$(command -v stalwart-cli)" "$backup/stalwart-cli.bin" 2>/dev/null || true
+  fi
+  script=$(mktemp)
+  curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 60 \
+    https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh -o "$script"
+  sh "$script"
+  rm -f "$script"
+
+  if ! command -v stalwart-cli >/dev/null 2>&1; then
+    found=$(find /root -type f -name stalwart-cli -perm -u+x 2>/dev/null | head -n1 || true)
+    [[ -n "$found" ]] && ln -sfn "$found" /usr/local/bin/stalwart-cli
+  fi
+  command -v stalwart-cli >/dev/null 2>&1 || fatal "Stalwart CLI update completed but the binary was not found."
+  ok "Stalwart CLI is now $(stalwart_cli_current_version)."
+}
+
+wait_bulwark_health() {
+  local i
+  for i in $(seq 1 45); do
+    if curl -fsS --connect-timeout 3 http://127.0.0.1:3000/api/health >/dev/null 2>&1; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+ensure_bulwark_compose_image_variable() {
+  local compose=/opt/bulwark-docker/compose.yml
+  [[ -f "$compose" ]] || return 0
+  if grep -qE '^[[:space:]]*image:[[:space:]]+ghcr\.io/bulwarkmail/webmail:latest[[:space:]]*$' "$compose"; then
+    sed -i 's#^\([[:space:]]*image:[[:space:]]*\)ghcr.io/bulwarkmail/webmail:latest[[:space:]]*$#\1"${BULWARK_IMAGE:-ghcr.io/bulwarkmail/webmail:latest}"#' "$compose"
+  fi
+}
+
+update_bulwark_docker() {
+  local current latest backup old_image rollback_tag compose_dir=/opt/bulwark-docker
+  current=$(bulwark_current_version)
+  latest=$(github_latest_version bulwarkmail/webmail) || fatal "Could not query latest Bulwark release."
+  info "Installed Bulwark: ${current}"
+  info "Latest Bulwark:    ${latest}"
+  if [[ "$current" != "unknown" ]] && ! version_is_newer "$latest" "$current"; then
+    ok "Bulwark is already current."
+    return 0
+  fi
+
+  [[ -f "$compose_dir/compose.yml" ]] || fatal "Bulwark compose file is missing: $compose_dir/compose.yml"
+  backup=$(backup_metadata_dir bulwark-docker)
+  cp -a "$compose_dir/compose.yml" "$backup/compose.yml"
+  [[ -f "$compose_dir/.env" ]] && cp -a "$compose_dir/.env" "$backup/.env" || true
+  old_image=$(docker inspect -f '{{.Image}}' bulwark 2>/dev/null || true)
+  if [[ -n "$old_image" ]]; then
+    rollback_tag="katebsaber/bulwark-rollback:$(date +%Y%m%d%H%M%S)"
+    docker tag "$old_image" "$rollback_tag"
+    printf '%s\n' "$rollback_tag" >"$backup/rollback-image.txt"
+  fi
+
+  ensure_bulwark_compose_image_variable
+  rm -f "$compose_dir/.env"
+  (cd "$compose_dir" && docker compose pull bulwark && docker compose up -d --force-recreate bulwark)
+
+  if ! wait_bulwark_health; then
+    err "Updated Bulwark failed health check; rolling back."
+    if [[ -n "${rollback_tag:-}" ]]; then
+      printf 'BULWARK_IMAGE=%s\n' "$rollback_tag" >"$compose_dir/.env"
+      (cd "$compose_dir" && docker compose up -d --force-recreate bulwark) || true
+      wait_bulwark_health || true
+    fi
+    fatal "Bulwark update failed. A rollback was attempted; backup is at $backup"
+  fi
+
+  rm -f "$compose_dir/.env"
+  ok "Bulwark updated successfully. Current version: $(bulwark_current_version)"
+}
+
+update_bulwark_native() {
+  local current latest old_commit backup
+  current=$(bulwark_current_version)
+  latest=$(github_latest_version bulwarkmail/webmail) || fatal "Could not query latest Bulwark release."
+  info "Installed Bulwark: ${current}"
+  info "Latest Bulwark:    ${latest}"
+  if [[ "$current" != "unknown" ]] && ! version_is_newer "$latest" "$current"; then
+    ok "Bulwark is already current."
+    return 0
+  fi
+
+  [[ -d /opt/bulwark/.git ]] || fatal "Native Bulwark Git checkout was not found."
+  backup=$(backup_metadata_dir bulwark-native)
+  old_commit=$(git -C /opt/bulwark rev-parse HEAD)
+  printf '%s\n' "$old_commit" >"$backup/commit.txt"
+  cp -a /etc/bulwark "$backup/etc-bulwark" 2>/dev/null || true
+
+  systemctl stop bulwark
+  git -C /opt/bulwark fetch --tags --force origin
+  if git -C /opt/bulwark rev-parse "v${latest}^{commit}" >/dev/null 2>&1; then
+    git -C /opt/bulwark checkout --detach "v${latest}"
+  elif git -C /opt/bulwark rev-parse "${latest}^{commit}" >/dev/null 2>&1; then
+    git -C /opt/bulwark checkout --detach "${latest}"
+  else
+    git -C /opt/bulwark reset --hard origin/HEAD
+  fi
+
+  cd /opt/bulwark
+  if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
+  npm run build
+  chown -R bulwark:bulwark /opt/bulwark
+  systemctl start bulwark
+
+  if ! wait_bulwark_health; then
+    err "Updated native Bulwark failed health check; rolling back source commit."
+    systemctl stop bulwark >/dev/null 2>&1 || true
+    git -C /opt/bulwark checkout --detach "$old_commit" || true
+    cd /opt/bulwark
+    if [[ -f package-lock.json ]]; then npm ci || true; else npm install || true; fi
+    npm run build || true
+    chown -R bulwark:bulwark /opt/bulwark || true
+    systemctl start bulwark >/dev/null 2>&1 || true
+    fatal "Bulwark update failed; previous commit was restored."
+  fi
+  ok "Bulwark updated successfully. Current version: $(bulwark_current_version)"
+}
+
+update_bulwark() {
+  stage "Update Bulwark"
+  case "${BULWARK_MODE:-unknown}" in
+    docker) update_bulwark_docker ;;
+    native) update_bulwark_native ;;
+    *) fatal "Cannot determine how Bulwark is deployed." ;;
+  esac
+}
+
+update_system_components() {
+  stage "Update Docker / Nginx / Certbot packages"
+  export DEBIAN_FRONTEND=noninteractive
+  apt_update_resilient
+
+  local packages=() pkg
+  for pkg in docker.io docker-compose-v2 docker-ce docker-ce-cli containerd.io nginx certbot python3-certbot-nginx; do
+    if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
+      packages+=("$pkg")
+    fi
+  done
+
+  if ((${#packages[@]})); then
+    apt-get install -y --only-upgrade "${packages[@]}"
+  else
+    warn "No managed Docker/Nginx/Certbot packages were detected by dpkg."
+  fi
+
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl restart nginx >/dev/null 2>&1 || true
+  systemctl restart docker >/dev/null 2>&1 || true
+  systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+  ok "System components update pass completed."
+}
+
+update_all_safe() {
+  stage "Update all mail stack components"
+  local failed=0
+  update_stalwart || failed=$((failed+1))
+  update_stalwart_cli || failed=$((failed+1))
+  update_bulwark || failed=$((failed+1))
+  update_system_components || failed=$((failed+1))
+  load_managed_state
+  manager_health_check || failed=$((failed+1))
+  if (( failed == 0 )); then
+    ok "All safe update operations completed successfully."
+  else
+    warn "Update-all completed with ${failed} skipped/failed operation(s). Review the messages above."
+    return 1
+  fi
+}
+
+repair_managed_stack() {
+  stage "Reconcile managed configuration"
+  warn "This reapplies the managed listeners, DNS automation, Nginx config and certificate wiring without deleting mail data."
+  confirm "Continue with repair/reconcile?" N || return 0
+
+  install_base_packages
+  ensure_cloudflare_token
+  cloudflare_find_zone
+  cloudflare_bootstrap_dns
+  validate_bootstrap_dns
+  install_stalwart_cli
+  prepare_stalwart_recovery_mode
+  apply_stalwart_declarative_config
+  configure_stalwart_listeners
+  issue_tls_certificate
+  configure_stalwart_certificate_in_recovery
+  create_certbot_deploy_hook
+  write_final_nginx_config
+  exit_stalwart_recovery_mode
+  validate_stalwart_admin
+  install_bulwark
+  nginx -t >/dev/null && systemctl reload nginx
+  fetch_stalwart_dns_zone
+  validate_mail_ports
+  manager_health_check
+  ok "Managed configuration reconciliation completed."
+}
+
+show_recent_manager_log() {
+  stage "Recent installer/manager log"
+  tail -n 120 "$LOG_FILE" 2>/dev/null || true
+}
+
+manager_menu() {
+  load_managed_state
+
+  if [[ "$MANAGER_ACTION" == "status" ]]; then
+    print_component_versions
+    manager_health_check || true
+    return 0
+  elif [[ "$MANAGER_ACTION" == "update-all" ]]; then
+    update_all_safe
+    return $?
+  fi
+
+  while true; do
+    banner
+    printf '%b\n' "${GREEN}${BOLD}Existing managed mail stack detected.${RESET}"
+    printf '  Domain:          %s\n' "$DOMAIN"
+    printf '  Stalwart Admin:  https://%s/admin\n' "$MAIL_HOST"
+    printf '  Bulwark:         https://%s\n' "$WEBMAIL_HOST"
+    printf '  Stalwart:        %s\n' "$(service_state_word stalwart)"
+    printf '  Nginx:           %s\n' "$(service_state_word nginx)"
+    printf '  Bulwark mode:    %s\n' "$BULWARK_MODE"
+    printf '  Stalwart ver:    %s\n' "$(stalwart_current_version)"
+    printf '  Stalwart CLI:    %s\n' "$(stalwart_cli_current_version)"
+    printf '  Bulwark ver:     %s\n' "$(bulwark_current_version)"
+    echo
+    printf '%b\n' "${WHITE}${BOLD}Mail Stack Manager${RESET}"
+    cat <<'MENU'
+  1) Show installed + latest versions
+  2) Show URLs and login credentials
+  3) Health check
+  4) Update Stalwart
+  5) Update Stalwart CLI
+  6) Update Bulwark
+  7) Update Docker / Nginx / Certbot packages
+  8) Update everything safely
+  9) Repair / reconcile configuration, DNS and listeners
+ 10) Show current install log
+ 11) Run/resume full provisioning workflow
+  0) Exit
+MENU
+    echo
+    local choice
+    read -r -p "Choose [0-11]: " choice
+    case "$choice" in
+      1) print_component_versions; pause "Press Enter to return to the manager..." ;;
+      2) show_access_information; pause "Press Enter to return to the manager..." ;;
+      3) manager_health_check || true; pause "Press Enter to return to the manager..." ;;
+      4) update_stalwart || true; pause "Press Enter to return to the manager..." ;;
+      5) update_stalwart_cli || true; pause "Press Enter to return to the manager..." ;;
+      6) update_bulwark || true; pause "Press Enter to return to the manager..." ;;
+      7) update_system_components || true; pause "Press Enter to return to the manager..." ;;
+      8) update_all_safe || true; pause "Press Enter to return to the manager..." ;;
+      9) repair_managed_stack || true; load_managed_state; pause "Press Enter to return to the manager..." ;;
+      10) show_recent_manager_log; pause "Press Enter to return to the manager..." ;;
+      11) FORCE_INSTALL=1; return 10 ;;
+      0|q|Q) return 0 ;;
+      *) warn "Invalid choice."; sleep 1 ;;
+    esac
+  done
 }
 
 main() {
@@ -1822,6 +2440,18 @@ main() {
   script_identity
   require_root
   validate_ubuntu
+
+  if managed_stack_exists && (( FORCE_INSTALL == 0 )); then
+    if manager_menu; then
+      exit 0
+    else
+      local manager_rc=$?
+      if [[ "$manager_rc" -ne 10 ]]; then
+        exit "$manager_rc"
+      fi
+      info "Continuing into full provisioning workflow from manager option 11."
+    fi
+  fi
 
   if (( RESET_PROGRESS )); then
     rm -f "$DONE_DIR"/* 2>/dev/null || true

@@ -1,656 +1,438 @@
-# MailStack Installer
+<div align="center" dir="rtl">
 
-[![English README](https://img.shields.io/badge/README-English-blue)](README.md)
-[![زبان فارسی](https://img.shields.io/badge/زبان-فارسی-green)](#)
-[![Ubuntu 24.04](https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com/)
-[![Bash](https://img.shields.io/badge/Bash-Installer-4EAA25?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
-[![GitHub](https://img.shields.io/badge/GitHub-amirkateb-181717?logo=github)](https://github.com/amirkateb)
+# ✉️ MailStack Installer
 
-> 🇬🇧 **English documentation:** [README.md](README.md)
+### نصب، مدیریت، حفاظت و فوروارد ایمیل — با یک اسکریپت
 
-یک نصب‌کننده تعاملی و مناسب محیط Production برای راه‌اندازی **Stalwart Mail Server + Bulwark Webmail** روی **Ubuntu 24.04 LTS**.
+**نصب‌کننده و پنل مدیریت تعاملی Stalwart و Bulwark برای Ubuntu 24.04 LTS**
 
-این پروژه بخش بزرگی از مراحل مورد نیاز برای راه‌اندازی یک Mail Server مدرن را به‌صورت خودکار انجام می‌دهد؛ از جمله بررسی DNS، نصب Docker و مسیرهای جایگزین، TLS، تنظیم Nginx، فایروال و راهنمای تنظیم SPF، DKIM و DMARC.
+راه‌اندازی سرور ایمیل واقعی، مدیریت چنددامنه‌ای، تنظیم خودکار DNS کلودفلر، بکاپ رمزنگاری‌شده و یک بخش **کاملاً مجزای Virtual Mail** برای فوروارد ایمیل با Cloudflare Email Routing.
 
-> ساخته شده توسط **amirmohammad katebsaber**
+[![نسخه](https://img.shields.io/badge/version-5.0.0-2563eb?style=for-the-badge)](./install-mailstack.sh)
+[![اوبونتو](https://img.shields.io/badge/Ubuntu-24.04%20LTS-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com/)
+[![بش](https://img.shields.io/badge/Bash-installer-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![ستاره‌ها](https://img.shields.io/github/stars/amirkateb/mailstack-installer?style=for-the-badge&logo=github)](https://github.com/amirkateb/mailstack-installer/stargazers)
 
----
+[![دانلود ریلیزها](https://img.shields.io/github/downloads/amirkateb/mailstack-installer/total?style=flat-square&label=Release%20Downloads&logo=github)](https://github.com/amirkateb/mailstack-installer/releases)
+[![فورک‌ها](https://img.shields.io/github/forks/amirkateb/mailstack-installer?style=flat-square&logo=github)](https://github.com/amirkateb/mailstack-installer/forks)
+[![ایشوها](https://img.shields.io/github/issues/amirkateb/mailstack-installer?style=flat-square&logo=github)](https://github.com/amirkateb/mailstack-installer/issues)
+[![آخرین کامیت](https://img.shields.io/github/last-commit/amirkateb/mailstack-installer?style=flat-square&logo=github)](https://github.com/amirkateb/mailstack-installer/commits/main/)
 
-## معرفی
+**[🇮🇷 فارسی](README.fa.md) · [🇬🇧 English](README.md) · [نصب](#نصب-سریع) · [ایمیل-مجازی](#ایمیل-مجازی-virtual-mail) · [انتشارها](https://github.com/amirkateb/mailstack-installer/releases)**
 
-MailStack Installer یک استک کامل ایمیل را با استفاده از اجزای زیر راه‌اندازی می‌کند:
+توسعه‌دهنده: **[amirmohammad katebsaber](https://github.com/amirkateb)**
 
-- **Stalwart Mail Server**
-- **Bulwark Webmail**
-- **Nginx**
-- **Let's Encrypt**
-- **Docker / Docker Compose**
-- **Ubuntu 24.04 LTS**
+</div>
 
-اسکریپت، کاربر را مرحله‌به‌مرحله در فرایند راه‌اندازی همراهی می‌کند، پیش‌نیازهای مهم را بررسی می‌کند و اگر با یک خطای حیاتی مواجه شود، با نمایش علت دقیق مشکل متوقف می‌شود.
+> [!IMPORTANT]
+> **این اسکریپت تنظیمات واقعی سرور را تغییر می‌دهد.** از جمله سرویس‌های ایمیل، فایروال، گواهی‌های SSL و DNS کلودفلر. پیش از اجرای عملیاتی، کد را بررسی کنید، از VPS اسنپ‌شات بگیرید و نخست روی یک دامنه آزمایشی اجرا کنید. تست‌های نسخه ۵ محلی و شبیه‌سازی‌شده بوده‌اند و جای آزمون واقعی روی Stalwart و Cloudflare شما را نمی‌گیرند.
 
----
+## فهرست مطالب
 
-# معماری
-
-```text
-                         Internet
-                            │
-              ┌─────────────┴─────────────┐
-              │                           │
-        SMTP / IMAP                  HTTPS / Web
-              │                           │
-              ▼                           ▼
-          Stalwart                      Nginx
-                                             │
-                               ┌─────────────┴─────────────┐
-                               │                           │
-                     mail.example.com          webmail.example.com
-                               │                           │
-                          Stalwart UI                  Bulwark
-                          JMAP / API                   Webmail
-```
-
-پورت‌های عمومی:
-
-```text
-25    SMTP
-465   SMTPS
-587   SMTP Submission
-993   IMAPS
-80    HTTP
-443   HTTPS
-```
-
-سرویس‌های داخلی:
-
-```text
-127.0.0.1:8080   Stalwart HTTP/JMAP
-127.0.0.1:3000   Bulwark Webmail
-```
+- [معرفی پروژه](#معرفی-پروژه)
+- [معماری سیستم](#معماری-سیستم)
+- [امکانات نسخه ۵](#امکانات-نسخه-۵)
+- [پیش‌نیازها](#پیشنیازها)
+- [نصب سریع](#نصب-سریع)
+- [نصب اولیه و DNS](#نصب-اولیه-و-dns)
+- [منوی مدیریت و دستورات](#منوی-مدیریت-و-دستورات)
+- [مدیریت چند دامنه واقعی](#مدیریت-چند-دامنه-واقعی)
+- [ایمیل مجازی (Virtual Mail)](#ایمیل-مجازی-virtual-mail)
+- [بکاپ و اطلاعات دسترسی](#بکاپ-بازیابی-و-اطلاعات-دسترسی)
+- [پورت‌ها و تنظیمات کلاینت](#پورتها-و-تنظیمات-کلاینت)
+- [عیب‌یابی و پایش](#عیبیابی-و-پایش)
+- [آمار دانلود](#آمار-دانلود)
+- [امنیت و محدودیت‌ها](#امنیت-و-محدودیتها)
+- [تغییرات نسخه ۵](#تغییرات-نسخه-۵)
+- [پشتیبانی و اعتبار](#پشتیبانی-و-اعتبار)
 
 ---
 
-# قابلیت‌ها
+## معرفی پروژه
 
-## نصب تعاملی
+**MailStack Installer** یک اسکریپت Bash برای نصب و مدیریت چرخه عمر سرور ایمیل است. این پروژه پس از نصب اولیه هم به‌صورت یک پنل مدیریتی خط فرمان قابل استفاده است.
 
-Installer دامنه اصلی را از شما می‌گیرد و hostnameهای موردنیاز را به‌صورت خودکار می‌سازد.
+| جزء | کاربرد |
+|---|---|
+| [Stalwart Mail Server](https://stalw.art/) | دریافت و ارسال SMTP، IMAP، صندوق‌ها، دامنه‌ها و ذخیره پیام |
+| [Bulwark Webmail](https://github.com/bulwarkmail/webmail) | محیط وب برای مشاهده ایمیل |
+| [Nginx](https://nginx.org/) | Reverse Proxy رابط‌های وب |
+| [Let's Encrypt](https://letsencrypt.org/) | صدور و تمدید گواهی TLS |
+| [Cloudflare DNS](https://developers.cloudflare.com/dns/) | ایجاد و مدیریت رکوردهای دامنه و احراز اصالت ایمیل |
+| [Cloudflare Email Routing](https://developers.cloudflare.com/email-routing/) | فوروارد **مجزای** ایمیل‌های مجازی به صندوق مقصد |
+| `systemd` | سرویس‌ها، زمان‌بندی بکاپ، پایش و تکمیل فورواردهای معلق |
 
-```text
-Domain:
-example.com
+### تفاوت ایمیل واقعی و ایمیل مجازی
 
-Mail hostname:
-mail.example.com
+- **ایمیل واقعی (Stalwart):** پیام روی سرور دریافت و ذخیره می‌شود؛ کاربر با IMAP/Bulwark آن را می‌خواند و با SMTP احرازشده ارسال می‌کند.
+- **ایمیل مجازی (Virtual Mail):** کلودفلر پیام دریافتی آدرس مجازی را به یک صندوق مقصدِ تأییدشده فوروارد می‌کند؛ **صندوق IMAP یا امکان ارسال SMTP با آن آدرس به‌تنهایی ساخته نمی‌شود.**
 
-Webmail hostname:
-webmail.example.com
+## معماری سیستم
+
+```mermaid
+flowchart TD
+    A[Internet / اینترنت] --> B{مسیر دریافت دامنه}
+    B -->|دامنه ایمیل واقعی / MX سرور| C[Stalwart Mail Server]
+    C --> D[(ذخیره پیام‌ها)]
+    E[کلاینت ایمیل] <-->|SMTP Submission / IMAPS| C
+    F[مرورگر] --> G[Nginx + TLS]
+    G --> H[مدیریت Stalwart / JMAP]
+    G --> I[Bulwark Webmail]
+    H --> C
+    I --> C
+    B -->|دامنه مجازی / MX کلودفلر| J[Cloudflare Email Routing]
+    J --> K[صندوق مقصد تأییدشده]
+    L[MailStack Manager] --> C
+    L --> M[Cloudflare API]
+    M --> J
 ```
 
-## بررسی DNS
+> [!WARNING]
+> **نباید Cloudflare Email Routing را روی همان دامنه‌ای فعال کنید که دریافت ایمیل آن با MX سرور Stalwart انجام می‌شود.** این دو مسیر دریافت، MX متفاوتی می‌خواهند. در نسخه ۵ برای جلوگیری از تداخل، جریان‌های مدیریتی از هم جدا شده‌اند و بررسی تعارض انجام می‌شود.
 
-قبل از نصب Mail Server موارد زیر بررسی می‌شوند:
+## امکانات نسخه ۵
 
-- IPv4 عمومی سرور
-- A Record مربوط به Mail Server
-- A Record مربوط به Webmail
-- MX
-- PTR / Reverse DNS
-- تطابق hostname و IP
+| بخش | قابلیت‌ها |
+|---|---|
+| **نصب تعاملی** | بررسی Ubuntu، تشخیص IP عمومی، بررسی DNS/PTR، تست پورت ۲۵ و امکان ادامه نصب نیمه‌تمام |
+| **سرور کامل ایمیل** | نصب و پیکربندی Stalwart، Bulwark، Nginx، TLS و تمدید گواهی |
+| **DNS کلودفلر** | لینک ساخت توکن محدود، تنظیم A/MX و انتشار SPF/DKIM/DMARC براساس مقادیر واقعی Stalwart |
+| **شبکه‌های محدود** | بررسی مخزن‌های Ubuntu، Mirror، رجیستری Docker و روش Native جایگزین برای Bulwark |
+| **چنددامنه‌ای** | افزودن دامنه ثانویه Stalwart، توکن مجزای Zone، بررسی سلامت DNS و حذف مرحله‌ای با کنترل وابستگی |
+| **Virtual Mail** | اتصال دامنه مجازی، افزودن/نمایش/ویرایش/حذف فوروارد، تأیید مقصد، Catch-all، تعویض توکن و پایش MX |
+| **کاربران و ایمیل‌ها** | مدیریت حساب و Alias، مشاهده صف خروجی و تست ارسال SMTP احرازشده |
+| **نگهداری** | به‌روزرسانی اجزا، تعمیر تنظیمات، سلامت سرویس، گزارش خطا و پیش‌نمایش DNS/مهاجرت |
+| **پایداری و امنیت** | بکاپ رمزنگاری‌شده داده‌های محلی، تأیید و بازیابی، تایمر پایش، هشدار تلگرام و بررسی امنیت |
+| **رمزها و توکن‌ها** | حفظ فایل TXT مدیریتی و اطلاعات Cloudflare با دسترسی محدود به root |
 
-اگر یک رکورد ضروری اشتباه باشد، Installer دقیقاً اعلام می‌کند چه چیزی باید اصلاح شود و سپس به‌صورت امن متوقف می‌شود.
+برخی امکانات عمداً **فقط خواندنی** هستند؛ مانند پیش‌نمایش مهاجرت، بررسی سیاست‌های MTA-STS/TLS-RPT/Autoconfig و بررسی صف. این اسکریپت انتقال واقعی پیام‌ها از سرویس‌دهنده قدیمی یا تحویل قطعی به Inbox را تضمین نمی‌کند.
 
-## SPF، DKIM و DMARC
+## پیش‌نیازها
 
-MailStack Installer مقدار DKIM را حدس نمی‌زند.
+| مورد | حداقل پیشنهادی |
+|---|---|
+| سیستم‌عامل | **Ubuntu Server 24.04 LTS** — اسکریپت نسخه را بررسی می‌کند |
+| دسترسی | `root` یا `sudo` |
+| پردازنده و حافظه | حداقل حدود ۲ vCPU و ۲ تا ۴ گیگابایت RAM؛ وابسته به حجم استفاده |
+| فضای ذخیره | ترجیحاً SSD با حدود ۴۰ گیگابایت به بالا، به‌علاوه فضای کافی برای صندوق‌ها |
+| اینترنت | IPv4 عمومی ثابت؛ پورت ۲۵ ورودی و خروجی برای میزبانی واقعی ایمیل |
+| دامنه | امکان مدیریت DNS؛ برای DNS خودکار، Zone کلودفلر و API Token مناسب |
+| PTR | دسترسی به تنظیم Reverse DNS در پنل ارائه‌دهنده VPS |
+| مخازن نرم‌افزاری | دسترسی به Repositoryها، نسخه‌های برنامه و سرویس صدور گواهی |
 
-بعد از اینکه Stalwart دامنه و کلیدهای امضای ایمیل را ایجاد کرد، اسکریپت رکوردهای تولیدشده توسط خود Stalwart را دریافت می‌کند و همان مقادیر واقعی را برای اضافه‌کردن به DNS نمایش می‌دهد.
+برای **Virtual Mail** روی نصب مدیریت‌شده، به دامنه جداگانه در Cloudflare و آدرس مقصد قابل تأیید نیاز دارید. محدودیت‌های خود سرویس Cloudflare Email Routing نیز اعمال می‌شوند.
 
-این رکوردها می‌توانند شامل موارد زیر باشند:
+## نصب سریع
 
-- SPF
-- DKIM
-- DMARC
-- MX
-- MTA-STS
-- Autoconfiguration
-- سایر رکوردهای مورد نیاز Stalwart
-
-## نصب Docker با روش‌های جایگزین
-
-مسیر اصلی:
+### روش اول: دریافت Repository
 
 ```bash
-apt install docker.io docker-compose-v2
-```
-
-قبل از ادامه، Docker و Docker Compose بررسی می‌شوند.
-
-اگر روش اصلی شکست بخورد، Installer می‌تواند مسیرهای جایگزین را امتحان کند.
-
-## پشتیبانی از شبکه‌های محدود
-
-MailStack Installer برای سرورهایی که دسترسی محدود یا ناپایداری به repositoryها و registryهای بین‌المللی دارند نیز در نظر گرفته شده است.
-
-قابلیت‌ها:
-
-- بررسی Repositoryهای Ubuntu
-- تشخیص Mirrorهای غیرقابل دسترس
-- تست Mirrorهای جایگزین
-- Backup گرفتن از تنظیمات Repository
-- بررسی Docker Hub
-- تنظیم Docker Registry Mirror
-- بررسی GitHub Container Registry
-- استفاده از نصب Native برای Bulwark در صورت نیاز
-
-## مسیر جایگزین نصب Bulwark
-
-Image رسمی Bulwark روی:
-
-```text
-ghcr.io
-```
-
-قرار دارد.
-
-Installer ابتدا اجرا می‌کند:
-
-```bash
-docker pull ghcr.io/bulwarkmail/webmail:latest
-```
-
-اگر GHCR در دسترس نباشد، Bulwark می‌تواند با این روش نصب شود:
-
-```text
-Node.js
-npm
-systemd
-```
-
-## TLS خودکار
-
-Certificateهای Let's Encrypt برای:
-
-```text
-mail.example.com
-webmail.example.com
-```
-
-دریافت می‌شوند.
-
-Certificateها برای HTTPS و پروتکل‌های Mail استفاده می‌شوند.
-
-همچنین یک Certbot deployment hook برای همگام‌سازی Certificate مورد استفاده Stalwart پس از Renewal ایجاد می‌شود.
-
-## Reverse Proxy با Nginx
-
-Stalwart:
-
-```text
-https://mail.example.com
-        │
-        ▼
-      Nginx
-        │
-        ▼
-127.0.0.1:8080
-        │
-        ▼
-    Stalwart
-```
-
-Bulwark:
-
-```text
-https://webmail.example.com
-        │
-        ▼
-      Nginx
-        │
-        ▼
-127.0.0.1:3000
-        │
-        ▼
-     Bulwark
-```
-
-## تنظیم فایروال
-
-پورت‌های عمومی:
-
-```text
-SSH
-25
-80
-443
-465
-587
-993
-```
-
-پورت‌های داخلی:
-
-```text
-3000
-8080
-```
-
-## مدیریت خطا
-
-اگر یک عملیات حیاتی شکست بخورد، Installer ادامه نمی‌دهد و اطلاعاتی مانند این‌ها را نمایش می‌دهد:
-
-- مرحله نصب
-- فرمان ناموفق
-- شماره خط
-- علت خطا
-- مسیر فایل Log
-
----
-
-# پیش‌نیازها
-
-حداقل منابع پیشنهادی:
-
-```text
-Operating System: Ubuntu Server 24.04 LTS
-CPU:              2 vCPU
-RAM:              2-4 GB
-Storage:          40+ GB SSD
-IPv4:             Static public address
-Access:           Root or sudo
-```
-
-همچنین نیاز دارید به:
-
-- دامنه
-- دسترسی مدیریت DNS
-- امکان تنظیم PTR / Reverse DNS
-- باز بودن Port 25 ورودی
-- باز بودن Port 25 خروجی
-
----
-
-# نصب
-
-## روش اول — Clone کردن Repository
-
-```bash
-ssh root@YOUR_SERVER_IP
-apt update
-apt install -y git
+sudo apt update
+sudo apt install -y git
 git clone https://github.com/amirkateb/mailstack-installer.git
 cd mailstack-installer
-chmod +x install-mailstack.sh
-./install-mailstack.sh
+bash -n install-mailstack.sh
+sudo bash install-mailstack.sh
 ```
 
-## روش دوم — دانلود مستقیم Installer
+### روش دوم: دانلود مستقیم فایل اصلی
 
 ```bash
-curl -fsSL \
-https://raw.githubusercontent.com/amirkateb/mailstack-installer/main/install-mailstack.sh \
--o install-mailstack.sh
+curl -fL --retry 3 \
+  https://raw.githubusercontent.com/amirkateb/mailstack-installer/main/install-mailstack.sh \
+  -o install-mailstack.sh
 
-chmod +x install-mailstack.sh
-sudo ./install-mailstack.sh
+# بررسی اختیاری پیش از اجرا
+bash -n install-mailstack.sh
+sha256sum install-mailstack.sh
+
+# کد را قبل از اجرای دسترسی root بررسی کنید.
+sudo bash install-mailstack.sh
 ```
 
----
+> **نکته:** این دستور فایل فعلی شاخه `main` را دریافت می‌کند و لزوماً برابر با یک Release یا نسخه تگ‌شده نیست. برای نصب نسخه ۵ از GitHub، باید ابتدا همین نسخه را در مخزن منتشر کرده باشید.
 
-# مراحل نصب
-
-```text
-1. بررسی سیستم
-2. دریافت دامنه
-3. تشخیص IP عمومی
-4. نمایش DNS اولیه
-5. بررسی A Recordها
-6. بررسی MX
-7. بررسی PTR
-8. تست SMTP خروجی
-9. بررسی Repositoryهای Ubuntu
-10. نصب Docker
-11. تست Docker Registry
-12. نصب Stalwart
-13. تنظیم Stalwart
-14. نصب Bulwark
-15. نصب Nginx
-16. دریافت Let's Encrypt
-17. تنظیم TLS برای SMTP و IMAP
-18. دریافت DNS Zone از Stalwart
-19. بررسی SPF / DKIM / DMARC
-20. Health Check نهایی
-```
-
----
-
-# تنظیم اولیه DNS
-
-فرض کنید:
-
-```text
-Domain: example.com
-Server IPv4: 203.0.113.10
-```
-
-رکورد Mail:
-
-```text
-Type: A
-Name: mail
-Value: 203.0.113.10
-```
-
-رکورد Webmail:
-
-```text
-Type: A
-Name: webmail
-Value: 203.0.113.10
-```
-
-MX:
-
-```text
-Type: MX
-Name: @
-Priority: 10
-Value: mail.example.com
-```
-
----
-
-# Reverse DNS
-
-در پنل VPS Provider باید PTR را تنظیم کنید:
-
-```text
-203.0.113.10 → mail.example.com
-```
-
-در جهت برعکس نیز:
-
-```text
-mail.example.com → 203.0.113.10
-```
-
-PTR صحیح نقش مهمی در اعتبار Mail Server و تحویل ایمیل دارد.
-
----
-
-# کاربران Cloudflare
-
-اگر DNS دامنه روی Cloudflare است، hostname مربوط به Mail Server باید معمولاً روی:
-
-```text
-DNS Only
-```
-
-باشد.
-
-پیشنهاد هنگام نصب:
-
-```text
-mail.example.com       DNS Only
-webmail.example.com    DNS Only
-```
-
-SMTP و IMAP را از Proxy معمولی Cloudflare عبور ندهید.
-
----
-
-# بعد از نصب
-
-پنل مدیریت Stalwart:
-
-```text
-https://mail.example.com/admin
-```
-
-Webmail:
-
-```text
-https://webmail.example.com
-```
-
----
-
-# تنظیم Mail Client
-
-## IMAP
-
-```text
-Server:         mail.example.com
-Port:           993
-Security:       SSL/TLS
-Username:       user@example.com
-Authentication: Password
-```
-
-## SMTP
-
-```text
-Server:         mail.example.com
-Port:           465
-Security:       SSL/TLS
-Username:       user@example.com
-Authentication: Password
-```
-
-یا:
-
-```text
-Port:     587
-Security: STARTTLS
-```
-
----
-
-# تست Deliverability
-
-بعد از نصب، برای Gmail، Outlook و Yahoo ایمیل آزمایشی بفرستید.
-
-در حالت ایده‌آل:
-
-```text
-SPF:   PASS
-DKIM:  PASS
-DMARC: PASS
-```
-
-باشد.
-
-PASS بودن این موارد تضمین نمی‌کند که ایمیل حتماً وارد Inbox شود.
-
-اعتبار IP، اعتبار دامنه، حجم ارسال، Complaint Rate، محتوا، PTR و Blacklistها نیز مؤثر هستند.
-
----
-
-# دستورات کاربردی
-
-Stalwart:
+### ورود مجدد به پنل مدیریت
 
 ```bash
-systemctl status stalwart
-systemctl restart stalwart
-journalctl -u stalwart -f
+sudo bash install-mailstack.sh
+# یا در صورت وجود نسخه مدیریتی پایدار روی سرور:
+sudo /usr/local/sbin/katebsaber-mailstack-manager
 ```
 
-Docker:
+در نصب شناخته‌شده، اسکریپت معمولاً منوی مدیریت را باز می‌کند. گزینه `--install` مخصوص زمانی است که **عمداً** قصد اجرای فرایند نصب یا ادامه آن را دارید.
 
-```bash
-systemctl status docker
-docker ps
-docker logs -f bulwark
+## نصب اولیه و DNS
+
+جریان نصب شامل بررسی سیستم، دریافت دامنه، تنظیم hostname، اعتبارسنجی توکن Cloudflare، رکوردهای اولیه، نصب Stalwart و Bulwark، تنظیم Nginx و SSL، رکوردهای احراز اصالت و بررسی سلامت نهایی است.
+
+نمونه:
+
+```text
+دامنه اصلی:       example.com
+سرور ایمیل:       mail.example.com
+وب‌میل:           webmail.example.com
+IPv4 عمومی:       203.0.113.10  (فقط IP نمونه مستندات)
 ```
 
-Nginx:
+| نوع | نام | مقدار | توضیح |
+|---|---|---|---|
+| `A` | `mail.example.com` | `203.0.113.10` | برای SMTP/IMAP حالت **DNS Only** |
+| `A` | `webmail.example.com` | `203.0.113.10` | سرویس HTTP/S در صورت تنظیم صحیح می‌تواند Proxy داشته باشد |
+| `MX` | `example.com` | `mail.example.com` | معمولاً با اولویت `10` |
+| `PTR` | `203.0.113.10` | `mail.example.com` | در پنل VPS، نه Cloudflare |
+| `TXT` | SPF/DKIM/DMARC | **مقدار واقعی تولیدشده توسط Stalwart** | کلید DKIM را حدس نزنید |
+
+اسکریپت لینک ساخت توکن محدود به دامنه را نمایش می‌دهد. بسته به عملیات، برخی مجوزهای Write صرفاً هنگام انجام تغییر واقعی قابل تأیید هستند. انتشار DNS و اعمال PTR ممکن است زمان‌بر باشد.
+
+بعد از نصب:
+
+- پنل Stalwart: `https://mail.example.com/admin`
+- وب‌میل Bulwark: `https://webmail.example.com`
+
+## منوی مدیریت و دستورات
+
+پنل مدیریت نسخه ۵ دارای **۳۰ گزینه** است:
+
+| گزینه | کاربرد |
+|---|---|
+| `1–3` | نسخه‌ها، اطلاعات ورود ذخیره‌شده و سلامت سیستم |
+| `4–9` | آپدیت Stalwart/CLI/Bulwark/اجزای سیستم و تعمیر تنظیمات |
+| `10–11` | لاگ‌ها و اجرای مجدد/ادامه نصب |
+| `12–15` | مشاهده، افزودن، حذف مرحله‌ای و بررسی دامنه‌های واقعی |
+| `16–17` | مدیریت حساب/نام مستعار و صف خروجی |
+| `18–22` | بکاپ رمزنگاری‌شده، اعتبارسنجی، بازیابی، تایمرها و هشدار تلگرام |
+| `23–25` | پیش‌نمایش مهاجرت، آزمایش SMTP و بررسی امنیت |
+| `26–29` | تعویض توکن، لغو حذف دامنه، پیش‌نمایش DNS و بررسی پیشرفته DNS |
+| **`30`** | **Virtual Mail — پنل مستقل فوروارد Cloudflare** |
+
+دستورهای نمونه:
 
 ```bash
-nginx -t
-systemctl reload nginx
+sudo bash install-mailstack.sh --help
+sudo bash install-mailstack.sh --status
+sudo bash install-mailstack.sh --list-domains
+sudo bash install-mailstack.sh --add-domain
+sudo bash install-mailstack.sh --remove-domain
+sudo bash install-mailstack.sh --domain-health
+sudo bash install-mailstack.sh --accounts
+sudo bash install-mailstack.sh --queue
+sudo bash install-mailstack.sh --backup-now
+sudo bash install-mailstack.sh --alerts
+sudo bash install-mailstack.sh --test-mail
+sudo bash install-mailstack.sh --security-review
+sudo bash install-mailstack.sh --virtual-mail
 ```
 
-شبکه:
+سایر گزینه‌ها: `--verify-backup PATH`، `--restore-backup PATH`، `--backup-timer`، `--update-all`، `--dns-preview`، `--advanced-dns`، `--rotate-cf-token`، `--migration-plan`، `--reconfigure`، `--reset-progress`، `--core-dns`، `--full-dns`، `--skip-ptr-check` و `--non-interactive`. پیش از اجرای گزینه‌های بازیابی یا تغییر DNS، اثر آن‌ها را بررسی کنید.
 
-```bash
-ss -lntp
+## مدیریت چند دامنه واقعی
+
+با گزینه **۱۳** می‌توانید دامنه ایمیل جدیدی را به Stalwart موجود اضافه کنید. اسکریپت برای دامنه جدید **توکن Cloudflare مربوط به Zone همان دامنه** را می‌خواهد، دسترسی را بررسی می‌کند، تعارض DNS را کنترل می‌کند و دامنه را در ساختار موجود قرار می‌دهد. همه این دامنه‌ها از همان سرویس‌های SMTP و IMAP سرور استفاده می‌کنند.
+
+گزینه **۱۴** حذف دامنه ثانویه را با **فرایند دومرحله‌ای و بازه بررسی ۷روزه** انجام می‌دهد. دامنه اصلی از این طریق قابل حذف نیست؛ وابستگی حساب‌ها و Aliasها بررسی می‌شود و تغییرات DNS با کنترل انجام می‌شوند. گزینه **۲۷** برای لغو حذف در انتظار است.
+
+> قبل از حذف دامنه‌ای که واقعاً استفاده می‌شود، بکاپ مستقل بگیرید و وابستگی‌های آن را بررسی کنید. حذف مرحله‌ای ریسک را کاهش می‌دهد اما تضمین بازگردانی تمام عملیات خارجی نیست.
+
+## ایمیل مجازی (Virtual Mail)
+
+**Virtual Mail یک سیستم مستقل از مدیریت دامنه‌های واقعی Stalwart است.** در این بخش آدرس فوروارد ساخته می‌شود، نه صندوق ایمیل با فضای ذخیره‌سازی.
+
+```text
+newsletter@virtual-example.com
+            │
+            ▼
+  Cloudflare Email Routing
+            │
+            ▼
+    my-inbox@gmail.com
 ```
 
-تست Port 25 خروجی:
+### راه‌اندازی قدم‌به‌قدم
 
-```bash
-nc -vz -w 8 gmail-smtp-in.l.google.com 25
+1. از منوی اصلی، گزینه **۳۰ — Virtual Mail** را انتخاب کنید؛ یا `--virtual-mail` را اجرا کنید.
+2. گزینه **۱ — اتصال دامنه و توکن** را بزنید؛ لینک ساخت API Token محدود Cloudflare نمایش داده می‌شود.
+3. Zone و Account مربوط را انتخاب کنید و دسترسی‌های موردنیاز جدول زیر را بدهید. دامنه نباید هم‌زمان روی سرویس ایمیل دیگری MX فعال داشته باشد.
+4. اسکریپت MXهای موجود را بررسی می‌کند؛ فعال‌سازی Email Routing را با تأیید صریح انجام دهید.
+5. با گزینه **۳** آدرس مجازی (مثلاً `hello@virtual-example.com`) و ایمیل مقصد را وارد کنید.
+6. **ایمیل تأیید Cloudflare را در صندوق مقصد باز کنید و روی لینک تأیید بزنید.** این مرحله را نمی‌توان با API Token دور زد.
+7. گزینه **۵** فوروارد معلق را تکمیل می‌کند؛ همچنین تایمر `systemd` جداگانه تقریباً **هر ۱۰ دقیقه** درخواست‌های معلق را بررسی می‌کند.
+8. با گزینه **۱۱** سلامت Cloudflare و MX را بررسی کنید و یک ایمیل آزمایشی واقعی بفرستید.
+
+### سطح دسترسی توکن Cloudflare
+
+| محدوده | مجوز | کاربرد |
+|---|---|---|
+| Zone | `Zone → Read` | شناسایی Zone |
+| Zone | `DNS → Read` | مشاهده رکوردهای MX |
+| Zone | `Zone Settings → Edit` | پیش‌نیازهای فعال‌سازی Routing |
+| Zone | `Email Routing Rules → Edit` | ساخت، تغییر و حذف فورواردها |
+| Account | `Email Routing Addresses → Edit` | ثبت آدرس مقصد |
+
+لینک ساخت توکن ممکن است تنها بخشی از مجوزها را از پیش انتخاب کند. **همه دسترسی‌ها را بررسی و در صورت نیاز دستی اضافه کنید** و دامنه/حساب را تا حد امکان محدود انتخاب کنید. اسامی مجوزها ممکن است در Cloudflare تغییر کنند.
+
+### منوی مستقل Virtual Mail
+
+| شماره | عملکرد |
+|---|---|
+| `1` | اتصال دامنه و توکن، فعال‌سازی Cloudflare Email Routing |
+| `2` | فهرست دامنه‌های مجازی و وضعیتشان |
+| `3` | افزودن فوروارد ایمیل مجازی |
+| `4` | نمایش قوانین فعال/غیرفعال و درخواست‌های معلق |
+| `5` | تکمیل فوروارد پس از تأیید مقصد |
+| `6` | تغییر مقصد یک آدرس |
+| `7` | حذف قانون فوروارد یا لغو درخواست معلق |
+| `8` | نمایش مقصدها و وضعیت تأیید |
+| `9` | تنظیم فوروارد Catch-all |
+| `10` | تعویض توکن و آرشیو توکن قبلی |
+| `11` | بررسی سلامت Routing و DNS |
+| `12` | غیرفعال‌سازی Routing دامنه بدون قانون فعال با کنترل‌های ایمنی |
+
+حذف فوروارد **صندوق مقصد مشترک، دامنه یا توکن ذخیره‌شده را حذف نمی‌کند.** فایل‌ها و زمان‌بند Virtual Mail جدا از مدیریت Stalwart هستند.
+
+**محدودیت:** سرویس Email Routing به‌خودی‌خود IMAP، POP3 یا SMTP ارسال فراهم نمی‌کند. تحویل ایمیل تابع محدودیت‌های Cloudflare، تأیید مقصد و وضعیت DNS است و هیچ تضمینی برای رسیدن پیام به Inbox وجود ندارد.
+
+مستندات رسمی: [Email Routing](https://developers.cloudflare.com/email-routing/) · [API کلودفلر](https://developers.cloudflare.com/api/resources/email_routing/) · [API Token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+
+## بکاپ، بازیابی و اطلاعات دسترسی
+
+**فایل TXT رمزها و توکن‌ها عمداً حفظ می‌شود و حذف نشده است.** مسیرهای مهم:
+
+```text
+/root/mailstack-secrets.txt                  # اطلاعات ورود و توکن‌ها؛ مخصوص root
+/root/mailstack-backup-passphrase.txt       # رمز بکاپ محلی
+/var/lib/katebsaber-mailstack-installer/     # وضعیت نصب، دامنه‌ها و بکاپ‌ها
+/var/lib/katebsaber-mailstack-installer/virtual-mail/  # تنظیمات و توکن‌های مستقل ایمیل مجازی
+/var/log/katebsaber-mailstack-installer-*.log
 ```
 
-DNS:
+سطح دسترسی فایل‌های حساس در حالت عادی باید مخصوص root باشد (مانند `0600` برای TXT و Token). **هرگز این فایل‌ها را در GitHub، Issue، اسکرین‌شات عمومی یا بکاپ بدون حفاظت قرار ندهید.** چون اطلاعات ورود به‌صورت متنی برای مدیریت نگهداری می‌شوند، افشای آن‌ها می‌تواند دسترسی کامل به ایمیل یا DNS بدهد.
+
+در منوی مدیریت:
+
+- **۱۸:** تهیه بکاپ سرد و رمزنگاری‌شده از داده‌ها و تنظیمات **محلی و پشتیبانی‌شده**.
+- **۱۹:** بررسی اعتبار فایل بکاپ.
+- **۲۰:** بازیابی با تأیید صریح مدیر.
+- **۲۱:** نصب زمان‌بند بکاپ و کنترل سلامت/هشدار.
+
+دستورهای نمونه:
 
 ```bash
-dig +short A mail.example.com
+sudo bash install-mailstack.sh --backup-now
+sudo bash install-mailstack.sh --verify-backup /absolute/path/to/backup.archive
+sudo bash install-mailstack.sh --restore-backup /absolute/path/to/backup.archive
+```
+
+نام فایل `.archive` صرفاً **نمونه مسیر** است؛ مسیر واقعی را از خروجی بکاپ بردارید. یک نسخه بکاپ رمزنگاری‌شده را **خارج از سرور** نگه دارید و بازیابی را در محیط آزمایشی تست کنید. اگر ذخیره‌سازی یا پایگاه داده خارجی به نصب اضافه کرده‌اید، برای آن بکاپ جداگانه لازم است.
+
+## پورت‌ها و تنظیمات کلاینت
+
+| پورت | پروتکل | کاربرد |
+|---:|---|---|
+| `25/tcp` | SMTP | دریافت/ارسال بین سرورهای ایمیل |
+| `465/tcp` | SMTP TLS | ارسال احرازشده |
+| `587/tcp` | SMTP STARTTLS | ارسال احرازشده |
+| `993/tcp` | IMAP TLS | دریافت پیام صندوق |
+| `80/tcp` | HTTP | چالش SSL و ریدایرکت |
+| `443/tcp` | HTTPS | مدیریت و وب‌میل |
+| `127.0.0.1:8080` | HTTP داخلی | رابط/ API مربوط به Stalwart |
+| `127.0.0.1:3000` | HTTP داخلی | سرویس Bulwark |
+
+**کلاینت ایمیل:** برای IMAP آدرس `mail.example.com` و پورت `993` با SSL/TLS؛ برای SMTP پورت `465` با SSL/TLS یا `587` با STARTTLS؛ نام کاربری معمولاً `user@example.com` با رمز همان حساب است.
+
+پورت‌های داخلی را در اینترنت منتشر نکنید. SMTP/IMAP را نیز از Proxy معمولی HTTP کلودفلر عبور ندهید.
+
+## عیب‌یابی و پایش
+
+```bash
+# وضعیت سرویس‌ها و لاگ‌ها
+sudo systemctl status stalwart nginx
+sudo journalctl -u stalwart -n 100 --no-pager
+sudo nginx -t
+sudo systemctl list-timers --all | grep -E 'mailstack|stalwart' || true
+
+# DNS و PTR
 dig +short MX example.com
-dig -x YOUR_SERVER_IP +short
-dig TXT example.com
-dig TXT _dmarc.example.com
+dig +short TXT example.com
+dig +short TXT _dmarc.example.com
+dig +short A mail.example.com
+dig -x 203.0.113.10 +short
+
+# گواهی و TLS
+openssl s_client -connect mail.example.com:993 -servername mail.example.com </dev/null
+openssl s_client -connect mail.example.com:465 -servername mail.example.com </dev/null
+
+# وب‌سرویس‌های محلی با پورت پیش‌فرض
+curl -I http://127.0.0.1:8080
+curl -I http://127.0.0.1:3000
 ```
 
-TLS:
+**اگر ایمیل دریافت نمی‌شود:** ابتدا رکورد MX واقعی، باز بودن پورت ۲۵، انتشار DNS، وجود گیرنده و لاگ‌های Stalwart را بررسی کنید. **اگر ارسال رد می‌شود:** احراز هویت SMTP، SPF/DKIM/DMARC، PTR، اعتبار IP و پاسخ سرور مقصد را بررسی کنید.
+
+**اگر Virtual Mail معلق ماند:** ایمیل تأیید مقصد را بررسی کنید و سپس گزینه‌های **۳۰ → ۴/۵/۸/۱۱**، دسترسی توکن و سرویس زمان‌بندی‌شده را ببینید:
 
 ```bash
-openssl s_client -connect mail.example.com:993 -servername mail.example.com
-openssl s_client -connect mail.example.com:465 -servername mail.example.com
+sudo systemctl status katebsaber-mailstack-virtual-mail.timer
+sudo journalctl -u katebsaber-mailstack-virtual-mail.service -n 100 --no-pager
 ```
 
----
+موفقیت SPF/DKIM/DMARC یا پاسخ SMTP به معنای تضمین ورود به Inbox نیست؛ اعتبار IP و دامنه و سیاست سرویس مقصد نیز اثر دارند.
 
-# بروزرسانی Bulwark
+## آمار دانلود
 
-در نصب Docker:
+نشان بالای README، **تعداد دانلود فایل‌های پیوست‌شده به GitHub Releases** را با استفاده از [Shields.io](https://shields.io/badges/git-hub-downloads-all-assets-all-releases) نشان می‌دهد. این شمارنده **شامل** دانلود با `git clone`، دریافت مستقیم فایل `raw.githubusercontent.com` یا دانلود آرشیو سورس در GitHub **نیست**.
 
-```bash
-cd /opt/bulwark
-docker compose pull
-docker compose up -d
-docker compose ps
-```
+در زمان تهیه این مستندات، مخزن هنوز **Release منتشرشده ندارد**؛ بنابراین عدد نشان دانلود هنوز آمار واقعی استفاده از اسکریپت را نشان نمی‌دهد. برای فعال‌شدن شمارنده:
 
----
+1. صفحه [Releases مخزن](https://github.com/amirkateb/mailstack-installer/releases) را باز کنید و **Draft a new release** را بزنید.
+2. تگی مانند `v5.0.0` بسازید، فایل `install-mailstack.sh` را به‌عنوان **Release Asset** پیوست کنید و Release را منتشر کنید.
+3. نشان موجود در README بعد از دانلود فایل‌های Release، به‌صورت خودکار به‌روز می‌شود.
 
-# Backup
+برای مشاهده بازدیدها و Cloneها، مالک مخزن می‌تواند وارد **Insights → Traffic** شود. این گزارش، بازه زمانی محدود را نشان می‌دهد و معادل شمارنده تمام دانلودهای Installer نیست. [مستندات آمار GitHub](https://docs.github.com/en/rest/metrics/traffic).
 
-مسیرهای مهم:
+## امنیت و محدودیت‌ها
 
-```text
-/etc/stalwart
-/var/lib/stalwart
-/etc/nginx
-/etc/letsencrypt
-/opt/bulwark
-```
+- برای هر Zone در Cloudflare تا حد امکان از توکن محدود با کمترین مجوز استفاده کنید.
+- فایل `/root/mailstack-secrets.txt` و آرشیو آن را تنها در اختیار root نگه دارید. **نگهداری رمزها به شکل TXT یک انتخاب آگاهانه برای مدیریت است، نه سامانه رمزنگاری‌شده مدیریت اسرار.**
+- سیستم‌عامل، Stalwart، Bulwark و Docker را به‌روز نگه دارید و پس از تغییر تنظیمات، فایروال و Nginx را بررسی کنید.
+- رکورد **PTR** توسط ارائه‌دهنده سرور تنظیم می‌شود و از طریق DNS عمومی Cloudflare قابل تنظیم نیست.
+- پیش از تغییر MX دامنه‌ای که ایمیل فعال دارد، برنامه مهاجرت و زمان‌بندی قطعی تهیه کنید.
+- پس از نصب حتماً ارسال و دریافت واقعی با Gmail/Outlook یا مقصد آزمایشی انجام دهید.
+- هیچ Rollbackای نمی‌تواند همه اقدامات سرویس‌دهندگان خارجی را در هر شرایطی بازگرداند؛ Snapshot و بکاپ مستقل ضروری است.
+- آزمایش‌های نسخه ۵ شامل تست نحوی، تست‌های آفلاین و Mock API بوده‌اند؛ **تأیید کامل در محیط عملیاتی انجام نشده است.**
 
-همچنین Docker Volumeهای مرتبط را Backup بگیرید.
+## تغییرات نسخه ۵
 
-حداقل یک Backup باید خارج از خود Mail Server نگهداری شود.
+**نسخه 5.0.0 — افزودن Virtual Mail مستقل با Cloudflare Email Routing**
 
----
+- منوی جدید **۳۰ — Virtual Mail** و دستور `--virtual-mail`.
+- اتصال Zone و Account با API Token محدود، کنترل MX و تضاد با دامنه‌های Stalwart.
+- افزودن، مشاهده، ویرایش و حذف آدرس‌های مجازی و مدیریت Catch-all.
+- ثبت درخواست معلق برای مقصد تأییدنشده و تلاش مجدد با تایمر جداگانه.
+- تعویض توکن و نگهداری آرشیو توکن قبلی؛ حفظ فایل مدیریتی TXT.
+- حفظ سایر امکانات نسخه قبلی مانند مدیریت چنددامنه‌ای، حساب‌ها، بکاپ و هشدارها.
 
-# توصیه‌های امنیتی
+تغییرات منتشرشده را از [تاریخچه GitHub](https://github.com/amirkateb/mailstack-installer/commits/main/) و در صورت ایجاد Release از [صفحه انتشارها](https://github.com/amirkateb/mailstack-installer/releases) دنبال کنید.
 
-- Ubuntu را به‌روز نگه دارید
-- Stalwart را به‌روز نگه دارید
-- Bulwark را به‌روز نگه دارید
-- Docker را به‌روز نگه دارید
-- از Passwordهای قوی استفاده کنید
-- در صورت امکان MFA را فعال کنید
-- Logها را بررسی کنید
-- Disk Usage را مانیتور کنید
-- Backup منظم داشته باشید
-- پورت‌های داخلی را Public نکنید
-- ارسال‌های غیرعادی SMTP را بررسی کنید
-- Rate Limit مناسب تنظیم کنید
-- هرگز Open Relay ایجاد نکنید
+## پشتیبانی و اعتبار
 
----
+- **Repository:** [amirkateb/mailstack-installer](https://github.com/amirkateb/mailstack-installer)
+- **گزارش باگ و پیشنهاد:** [GitHub Issues](https://github.com/amirkateb/mailstack-installer/issues)
+- **سازنده:** [amirmohammad katebsaber](https://github.com/amirkateb)
+- **مراجع رسمی:** [Stalwart](https://stalw.art/docs/) · [Cloudflare](https://developers.cloudflare.com/email-routing/) · [Let's Encrypt](https://letsencrypt.org/docs/)
 
-# رفع مشکلات
+### مجوز انتشار
 
-## Docker Pull کار نمی‌کند
+**این README به‌تنهایی هیچ مجوزی را اعلام نمی‌کند.** اگر قصد انتشار با مجوز MIT یا هر مجوز متن‌باز دیگری دارید، فایل `LICENSE` متناسب را به Repository اضافه کنید. نوشتن نام مجوز در README به‌تنهایی به معنی اعطای آن نیست.
 
-```bash
-docker pull hello-world
-docker pull ghcr.io/bulwarkmail/webmail:latest
-```
+### سلب مسئولیت
 
-اگر Docker Hub کار می‌کند ولی GHCR کار نمی‌کند، مشکل ممکن است فقط مربوط به GitHub Container Registry باشد.
+میزبانی ایمیل به نگهداری مستمر، امنیت، بکاپ، DNS، جلوگیری از سوءاستفاده، پایش و مدیریت اعتبار ارسال نیاز دارد. MailStack فرایند نصب و نگهداری را ساده‌تر می‌کند اما دسترس‌پذیری دائمی، تحویل قطعی یا ورود تضمینی به Inbox را فراهم نمی‌کند. مسئولیت بررسی و تأیید تغییرات روی زیرساخت بر عهده مدیر آن است.
 
-## Port 25 بسته است
+<div align="center" dir="rtl">
 
-```bash
-nc -vz -w 8 gmail-smtp-in.l.google.com 25
-```
+**برای کسانی که می‌خواهند کنترل زیرساخت ایمیل خودشان را در دست داشته باشند.**
 
-اگر Timeout شد، با VPS Provider تماس بگیرید.
+[↑ بازگشت به بالا](#-mailstack-installer) · [English](README.md)
 
-## PTR اشتباه است
-
-```bash
-dig -x YOUR_SERVER_IP +short
-```
-
-باید نتیجه مشابه این باشد:
-
-```text
-mail.example.com.
-```
-
-## Bulwark خطای 502 می‌دهد
-
-```bash
-docker ps
-curl http://127.0.0.1:3000/api/health
-nginx -t
-```
-
-## پنل Stalwart باز نمی‌شود
-
-```bash
-systemctl status stalwart
-curl http://127.0.0.1:8080
-journalctl -u stalwart -n 200
-```
-
----
-
-# پروژه
-
-Repository:
-
-https://github.com/amirkateb/mailstack-installer
-
-نسخه انگلیسی:
-
-[README.md](README.md)
-
----
-
-# سازنده
-
-**amirmohammad katebsaber**
-
-GitHub:
-
-https://github.com/amirkateb
-
----
-
-# License
-
-برای این پروژه می‌توانید از License آزادی مانند **MIT License** استفاده کنید.
-
----
-
-# سلب مسئولیت
-
-راه‌اندازی Mail Server شخصی نیازمند نگهداری مداوم، مدیریت DNS، امنیت، Backup، مانیتورینگ، Reputation Management و جلوگیری از سوءاستفاده است.
-
-MailStack Installer مراحل نصب را ساده‌تر می‌کند، اما نمی‌تواند تحویل قطعی ایمیل یا ورود آن به Inbox را تضمین کند.
+</div>

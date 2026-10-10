@@ -421,9 +421,6 @@ sudo journalctl -u katebsaber-mailstack-virtual-mail.service -n 100 --no-pager
 - **سازنده:** [amirmohammad katebsaber](https://github.com/amirkateb)
 - **مراجع رسمی:** [Stalwart](https://stalw.art/docs/) · [Cloudflare](https://developers.cloudflare.com/email-routing/) · [Let's Encrypt](https://letsencrypt.org/docs/)
 
-### مجوز انتشار
-
-**این README به‌تنهایی هیچ مجوزی را اعلام نمی‌کند.** اگر قصد انتشار با مجوز MIT یا هر مجوز متن‌باز دیگری دارید، فایل `LICENSE` متناسب را به Repository اضافه کنید. نوشتن نام مجوز در README به‌تنهایی به معنی اعطای آن نیست.
 
 ### سلب مسئولیت
 

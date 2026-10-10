@@ -423,9 +423,6 @@ See [repository history](https://github.com/amirkateb/mailstack-installer/commit
 - **Author:** [amirmohammad katebsaber](https://github.com/amirkateb)
 - **Official references:** [Stalwart](https://stalw.art/docs/) · [Cloudflare](https://developers.cloudflare.com/email-routing/) · [Let's Encrypt](https://letsencrypt.org/docs/)
 
-### License
-
-**No license is asserted by this README.** Add a `LICENSE` file to the repository if you intend to publish under MIT or another open-source license; naming a license in documentation does not grant one automatically.
 
 ### Disclaimer
 
